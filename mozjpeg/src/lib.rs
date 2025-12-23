@@ -22,6 +22,7 @@ pub mod bitstream;
 pub mod color;
 pub mod consts;
 pub mod dct;
+pub mod entropy;
 pub mod error;
 pub mod huffman;
 pub mod quant;
@@ -66,3 +67,5 @@ pub use huffman::{
 };
 
 pub use bitstream::{BitWriter, VecBitWriter};
+
+pub use entropy::{EntropyEncoder, encode_block_standalone, jpeg_nbits};

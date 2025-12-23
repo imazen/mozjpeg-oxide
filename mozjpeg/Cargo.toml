@@ -21,6 +21,8 @@ criterion = { workspace = true }
 jpeg-decoder = { workspace = true }
 # Use existing mozjpeg-sys from crates.io for basic FFI validation
 mozjpeg-sys = "2.2"
+# Local mozjpeg-sys with granular test exports for layer-by-layer validation
+mozjpeg-sys-local = { path = "../mozjpeg-sys" }
 
 [[bench]]
 name = "encode"

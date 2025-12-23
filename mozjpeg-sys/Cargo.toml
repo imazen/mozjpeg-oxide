@@ -1,0 +1,12 @@
+[package]
+name = "mozjpeg-sys-local"
+version = "0.1.0"
+edition = "2021"
+description = "Local FFI bindings to mozjpeg with test exports"
+links = "mozjpeg"
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+cmake = "0.1"

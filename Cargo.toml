@@ -1,5 +1,5 @@
 [workspace]
-members = ["mozjpeg"]
+members = ["mozjpeg", "mozjpeg-sys"]
 resolver = "2"
 
 [workspace.package]

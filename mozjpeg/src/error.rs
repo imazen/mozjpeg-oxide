@@ -1,0 +1,96 @@
+//! Error types for the mozjpeg encoder.
+
+use std::fmt;
+
+/// Result type for mozjpeg operations.
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// Error type for mozjpeg operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Error {
+    /// Invalid image dimensions (zero width or height)
+    InvalidDimensions { width: u32, height: u32 },
+    /// Image buffer size doesn't match dimensions
+    BufferSizeMismatch { expected: usize, actual: usize },
+    /// Invalid quality value (must be 1-100)
+    InvalidQuality(u8),
+    /// Invalid quantization table index
+    InvalidQuantTableIndex(usize),
+    /// Invalid component index
+    InvalidComponentIndex(usize),
+    /// Invalid Huffman table index
+    InvalidHuffmanTableIndex(usize),
+    /// Invalid sampling factor
+    InvalidSamplingFactor { h: u8, v: u8 },
+    /// Invalid scan specification
+    InvalidScanSpec { reason: &'static str },
+    /// Invalid Huffman table structure
+    InvalidHuffmanTable,
+    /// Huffman code length overflow (exceeds max allowed)
+    HuffmanCodeLengthOverflow,
+    /// Unsupported color space
+    UnsupportedColorSpace,
+    /// Unsupported feature
+    UnsupportedFeature(&'static str),
+    /// Internal encoder error
+    InternalError(&'static str),
+    /// I/O error
+    IoError(String),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::InvalidDimensions { width, height } => {
+                write!(f, "Invalid image dimensions: {}x{}", width, height)
+            }
+            Error::BufferSizeMismatch { expected, actual } => {
+                write!(f, "Buffer size mismatch: expected {}, got {}", expected, actual)
+            }
+            Error::InvalidQuality(q) => {
+                write!(f, "Invalid quality value: {} (must be 1-100)", q)
+            }
+            Error::InvalidQuantTableIndex(idx) => {
+                write!(f, "Invalid quantization table index: {}", idx)
+            }
+            Error::InvalidComponentIndex(idx) => {
+                write!(f, "Invalid component index: {}", idx)
+            }
+            Error::InvalidHuffmanTableIndex(idx) => {
+                write!(f, "Invalid Huffman table index: {}", idx)
+            }
+            Error::InvalidSamplingFactor { h, v } => {
+                write!(f, "Invalid sampling factor: {}x{}", h, v)
+            }
+            Error::InvalidScanSpec { reason } => {
+                write!(f, "Invalid scan specification: {}", reason)
+            }
+            Error::InvalidHuffmanTable => {
+                write!(f, "Invalid Huffman table structure")
+            }
+            Error::HuffmanCodeLengthOverflow => {
+                write!(f, "Huffman code length overflow (exceeds 16 bits)")
+            }
+            Error::UnsupportedColorSpace => {
+                write!(f, "Unsupported color space")
+            }
+            Error::UnsupportedFeature(feature) => {
+                write!(f, "Unsupported feature: {}", feature)
+            }
+            Error::InternalError(msg) => {
+                write!(f, "Internal encoder error: {}", msg)
+            }
+            Error::IoError(msg) => {
+                write!(f, "I/O error: {}", msg)
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::IoError(e.to_string())
+    }
+}

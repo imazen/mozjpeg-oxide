@@ -1,0 +1,68 @@
+//! mozjpeg-rs: Rust port of Mozilla's mozjpeg JPEG encoder.
+//!
+//! This library provides a high-quality JPEG encoder with features from mozjpeg:
+//! - Trellis quantization for optimal rate-distortion
+//! - Progressive JPEG with optimized scan order
+//! - Overshoot deringing for cleaner edges
+//! - Multiple perceptual quantization table variants
+//!
+//! # Example
+//!
+//! ```ignore
+//! use mozjpeg::{Encoder, ColorSpace};
+//!
+//! let encoder = Encoder::new()
+//!     .set_quality(85)
+//!     .set_progressive(true);
+//!
+//! let jpeg_data = encoder.encode(&rgb_pixels, width, height, ColorSpace::Rgb)?;
+//! ```
+
+pub mod bitstream;
+pub mod color;
+pub mod consts;
+pub mod dct;
+pub mod error;
+pub mod huffman;
+pub mod quant;
+pub mod types;
+
+// Re-export commonly used items
+pub use consts::{
+    DCTSIZE, DCTSIZE2,
+    JPEG_SOI, JPEG_EOI, JPEG_SOF0, JPEG_SOF2,
+    JPEG_DHT, JPEG_DQT, JPEG_SOS,
+    STD_LUMINANCE_QUANT_TBL, STD_CHROMINANCE_QUANT_TBL,
+    QuantTableIdx,
+};
+
+pub use error::{Error, Result};
+
+pub use types::{
+    ColorSpace, CompressionProfile, DctMethod, Subsampling,
+    ScanInfo, ComponentInfo, QuantTable, HuffmanTable,
+    TrellisConfig, DctBlock, SampleBlock, FloatBlock,
+};
+
+pub use quant::{
+    quality_to_scale_factor, quality_to_scale_factor_f32,
+    get_luminance_quant_table, get_chrominance_quant_table,
+    create_quant_table, create_quant_tables,
+    quantize_coef, dequantize_coef,
+    quantize_block, dequantize_block,
+};
+
+pub use dct::{forward_dct_8x8, forward_dct, level_shift};
+
+pub use color::{
+    rgb_to_ycbcr, rgb_to_gray, cmyk_to_ycck,
+    convert_rgb_to_ycbcr, convert_rgb_to_gray,
+    convert_block_rgb_to_ycbcr,
+};
+
+pub use huffman::{
+    HuffTable, DerivedTable, FrequencyCounter,
+    generate_optimal_table, MAX_CODE_LENGTH, NUM_HUFF_TBLS,
+};
+
+pub use bitstream::{BitWriter, VecBitWriter};

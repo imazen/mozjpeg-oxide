@@ -8,6 +8,24 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
 **API**: Idiomatic Rust (not C-compatible)
 **Validation**: FFI dual-execution against C mozjpeg
 
+## Current Status
+
+**120 tests passing** (116 unit tests + 4 FFI validation tests)
+
+### Completed Layers
+- Layer 0: Constants, types, error handling
+- Layer 1: Quantization tables, Huffman table construction
+- Layer 2: Forward DCT, color conversion, chroma subsampling
+- Layer 3: Bitstream writer with byte stuffing
+- Layer 4: Entropy encoder, trellis quantization
+- Layer 5: Progressive scan generation
+- Layer 6: Marker emission
+
+### Remaining Work
+- High-level Encoder struct/builder API
+- End-to-end encoding pipeline
+- Optional: deringing, arithmetic coding
+
 ## Workflow Rules
 
 ### Commit Strategy
@@ -34,6 +52,14 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
    - `FREQ_MERGED = 1_000_000_001` for merged nodes
 2. **Bitstream stuffing**: 0xFF bytes ALWAYS require 0x00 stuffing in entropy data
 3. **Bit buffer**: Use 64-bit buffer, flush when full, pad with 1-bits at end
+4. **Trellis quantization**: Core mozjpeg innovation
+   - Cost = Rate + Lambda * Distortion
+   - Lambda calculated from block energy and quant table
+   - Per-coefficient lambda weights = 1/q^2
+5. **Progressive encoding**:
+   - DC scans can be interleaved (multiple components)
+   - AC scans must be single-component
+   - Successive approximation uses Ah/Al for bit refinement
 
 ### Testing Patterns
 1. Use `#[cfg(test)]` modules within each source file
@@ -46,17 +72,18 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
 mozjpeg/src/
 ├── lib.rs          # Module exports, public API
 ├── consts.rs       # Layer 0: Constants, tables, markers
-├── types.rs        # Layer 0: ColorSpace, ScanInfo, etc.
+├── types.rs        # Layer 0: ColorSpace, ScanInfo, ComponentInfo, etc.
 ├── error.rs        # Error types
-├── quant.rs        # Layer 1: Quantization tables
+├── quant.rs        # Layer 1: Quantization tables (9 variants)
 ├── huffman.rs      # Layer 1: Huffman table construction
-├── dct.rs          # Layer 2: Forward DCT
-├── color.rs        # Layer 2: Color conversion
-├── bitstream.rs    # Layer 3: Bit-level I/O
-├── sample.rs       # Layer 2: Chroma subsampling (TODO)
-├── entropy.rs      # Layer 4: Entropy encoding (TODO)
-├── trellis.rs      # Layer 4: Trellis quantization (TODO)
-├── progressive.rs  # Layer 5: Progressive scans (TODO)
+├── dct.rs          # Layer 2: Forward DCT (Loeffler algorithm)
+├── color.rs        # Layer 2: Color conversion (RGB→YCbCr, etc.)
+├── sample.rs       # Layer 2: Chroma subsampling (4:4:4, 4:2:2, 4:2:0)
+├── bitstream.rs    # Layer 3: Bit-level I/O with byte stuffing
+├── entropy.rs      # Layer 4: Huffman entropy encoding
+├── trellis.rs      # Layer 4: Trellis quantization (rate-distortion)
+├── progressive.rs  # Layer 5: Progressive scan generation
+├── marker.rs       # Layer 6: JPEG marker emission
 └── encode.rs       # Layer 6: Encoder pipeline (TODO)
 ```
 

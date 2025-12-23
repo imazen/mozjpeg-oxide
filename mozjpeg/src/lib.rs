@@ -25,6 +25,7 @@ pub mod dct;
 pub mod entropy;
 pub mod error;
 pub mod huffman;
+pub mod progressive;
 pub mod quant;
 pub mod sample;
 pub mod trellis;
@@ -78,3 +79,9 @@ pub use sample::{
 };
 
 pub use trellis::{trellis_quantize_block, simple_quantize_block};
+
+pub use progressive::{
+    generate_simple_progressive_scans, generate_standard_progressive_scans,
+    generate_optimized_progressive_scans, generate_baseline_scan,
+    validate_scan_script, is_progressive_script,
+};

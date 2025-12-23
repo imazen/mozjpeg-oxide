@@ -10,7 +10,7 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
 
 ## Current Status
 
-**134 tests passing** (116 unit + 8 FFI comparison + 6 mozjpeg-sys + 4 ffi_validation)
+**142 tests passing** (124 unit + 8 FFI comparison + 6 mozjpeg-sys + 4 ffi_validation)
 
 ### Completed Layers
 - Layer 0: Constants, types, error handling
@@ -19,12 +19,24 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
 - Layer 3: Bitstream writer with byte stuffing
 - Layer 4: Entropy encoder, trellis quantization
 - Layer 5: Progressive scan generation
-- Layer 6: Marker emission
+- Layer 6: Marker emission, **Encoder pipeline**
 - **FFI Validation**: Granular comparison tests against C mozjpeg
 
+### Working Encoder
+The encoder produces valid JPEG files that can be decoded by standard decoders:
+```rust
+use mozjpeg::Encoder;
+
+let encoder = Encoder::new()
+    .quality(85)
+    .subsampling(Subsampling::S420);
+let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
+```
+
 ### Remaining Work
-- High-level Encoder struct/builder API
-- End-to-end encoding pipeline
+- Progressive encoding mode (currently baseline only)
+- Trellis quantization integration
+- Huffman table optimization
 - Optional: deringing, arithmetic coding
 
 ## Workflow Rules
@@ -89,7 +101,8 @@ mozjpeg-rs/
 │   │   ├── entropy.rs          # Layer 4: Huffman encoding
 │   │   ├── trellis.rs          # Layer 4: Trellis quantization
 │   │   ├── progressive.rs      # Layer 5: Progressive scans
-│   │   └── marker.rs           # Layer 6: JPEG markers
+│   │   ├── marker.rs           # Layer 6: JPEG markers
+│   │   └── encode.rs           # Layer 6: Encoder pipeline
 │   └── tests/
 │       ├── ffi_validation.rs   # crates.io mozjpeg-sys tests
 │       └── ffi_comparison.rs   # Local FFI granular comparison

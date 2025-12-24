@@ -58,11 +58,18 @@ impl<W: Write> BitWriter<W> {
 
         if self.free_bits < 0 {
             // Buffer is full, need to flush
+            // -free_bits = number of bits that overflow into next buffer
+            let overflow_bits = (-self.free_bits) as u32;
+
+            // Put upper bits into current buffer before flush
             self.put_buffer = (self.put_buffer << (size + self.free_bits))
-                | ((code as u64) >> (-self.free_bits));
+                | ((code as u64) >> overflow_bits);
             self.flush_buffer()?;
+
+            // Reset buffer with only the overflow (lower) bits
             self.free_bits += BIT_BUF_SIZE as i32;
-            self.put_buffer = code as u64;
+            // Mask to keep only the lower overflow_bits
+            self.put_buffer = (code as u64) & ((1u64 << overflow_bits) - 1);
         } else {
             self.put_buffer = (self.put_buffer << size) | (code as u64);
         }

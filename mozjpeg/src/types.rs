@@ -93,7 +93,6 @@ pub enum CompressionProfile {
     /// - Progressive mode
     /// - Trellis quantization
     /// - Optimized Huffman tables
-    /// - Overshoot deringing
     /// - ImageMagick quantization tables (index 3)
     #[default]
     MaxCompression = 0x5D083AAD,

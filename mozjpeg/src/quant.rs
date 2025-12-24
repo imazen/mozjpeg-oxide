@@ -8,7 +8,7 @@
 //! Reference: mozjpeg/jcparam.c
 
 use crate::consts::{
-    DCTSIZE2, NUM_QUANT_TABLE_VARIANTS,
+    DCTSIZE2,
     STD_LUMINANCE_QUANT_TBL, STD_CHROMINANCE_QUANT_TBL,
     QuantTableIdx,
 };
@@ -181,6 +181,7 @@ pub fn dequantize_block(qcoeffs: &[i16; DCTSIZE2], quant_table: &[u16; DCTSIZE2]
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::consts::NUM_QUANT_TABLE_VARIANTS;
 
     #[test]
     fn test_quality_scaling_matches_mozjpeg() {

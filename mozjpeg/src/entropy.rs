@@ -11,9 +11,10 @@ use std::io::Write;
 
 use crate::bitstream::BitWriter;
 use crate::consts::{DCTSIZE2, JPEG_NATURAL_ORDER};
-use crate::huffman::DerivedTable;
+use crate::huffman::{DerivedTable, FrequencyCounter};
 
 /// Maximum coefficient bit size for 8-bit JPEG (10 bits for AC, 11 for DC diff)
+#[allow(dead_code)]
 const MAX_COEF_BITS: u8 = 10;
 
 /// EOB (End of Block) symbol - encodes as run=0, size=0
@@ -213,6 +214,410 @@ pub fn encode_block_standalone<W: Write>(
     encoder.set_last_dc(0, last_dc);
     encoder.encode_block(block, 0, dc_table, ac_table)?;
     Ok(encoder.last_dc(0))
+}
+
+// =============================================================================
+// Symbol Frequency Counting (for Huffman optimization)
+// =============================================================================
+
+/// Count symbol frequencies from a block for Huffman table optimization.
+///
+/// This is used in the first pass of 2-pass encoding to gather statistics
+/// that will be used to generate optimal Huffman tables.
+pub struct SymbolCounter {
+    /// Last DC value for each component (for differential coding)
+    last_dc_val: [i16; 4],
+}
+
+impl Default for SymbolCounter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SymbolCounter {
+    /// Create a new symbol counter.
+    pub fn new() -> Self {
+        Self {
+            last_dc_val: [0; 4],
+        }
+    }
+
+    /// Reset DC predictions.
+    pub fn reset(&mut self) {
+        self.last_dc_val = [0; 4];
+    }
+
+    /// Count symbols in a block, updating frequency counters.
+    ///
+    /// # Arguments
+    /// * `block` - Quantized DCT coefficients
+    /// * `component` - Component index for DC prediction
+    /// * `dc_counter` - Frequency counter for DC symbols
+    /// * `ac_counter` - Frequency counter for AC symbols
+    pub fn count_block(
+        &mut self,
+        block: &[i16; DCTSIZE2],
+        component: usize,
+        dc_counter: &mut FrequencyCounter,
+        ac_counter: &mut FrequencyCounter,
+    ) {
+        // Count DC symbol
+        let dc = block[0];
+        let diff = dc.wrapping_sub(self.last_dc_val[component]);
+        self.last_dc_val[component] = dc;
+
+        let nbits = jpeg_nbits(diff);
+        dc_counter.count(nbits);
+
+        // Count AC symbols
+        let mut run = 0u8;
+
+        for &zigzag_idx in JPEG_NATURAL_ORDER[1..].iter() {
+            let coef = block[zigzag_idx];
+
+            if coef == 0 {
+                run += 1;
+            } else {
+                // Count ZRL codes for runs of 16+ zeros
+                while run >= 16 {
+                    ac_counter.count(0xF0); // ZRL
+                    run -= 16;
+                }
+
+                let nbits = jpeg_nbits(coef);
+                let symbol = (run << 4) | nbits;
+                ac_counter.count(symbol);
+                run = 0;
+            }
+        }
+
+        // Count EOB if there are trailing zeros
+        if run > 0 {
+            ac_counter.count(0x00); // EOB
+        }
+    }
+}
+
+// =============================================================================
+// Progressive Entropy Encoder
+// =============================================================================
+
+/// Progressive entropy encoder for multi-scan JPEG encoding.
+///
+/// Progressive JPEG uses:
+/// - DC scans: encode DC coefficients with optional successive approximation
+/// - AC scans: encode AC coefficients in spectral bands (Ss..Se) for one component
+/// - Refinement scans: encode additional bits of previously-coded coefficients
+pub struct ProgressiveEncoder<'a, W: Write> {
+    /// Bitstream writer
+    writer: &'a mut BitWriter<W>,
+    /// Last DC value for each component (for differential coding)
+    last_dc_val: [i16; 4],
+    /// End-of-block run count (for EOBRUN encoding)
+    eobrun: u16,
+}
+
+impl<'a, W: Write> ProgressiveEncoder<'a, W> {
+    /// Create a new progressive encoder.
+    pub fn new(writer: &'a mut BitWriter<W>) -> Self {
+        Self {
+            writer,
+            last_dc_val: [0; 4],
+            eobrun: 0,
+        }
+    }
+
+    /// Reset DC predictions (called at start of each scan).
+    pub fn reset(&mut self) {
+        self.last_dc_val = [0; 4];
+        self.eobrun = 0;
+    }
+
+    /// Encode a DC scan (first pass, Ah=0).
+    ///
+    /// # Arguments
+    /// * `block` - DCT coefficients in natural order
+    /// * `component` - Component index for DC prediction
+    /// * `dc_table` - Huffman table for DC
+    /// * `al` - Point transform (successive approximation low bit)
+    pub fn encode_dc_first(
+        &mut self,
+        block: &[i16; DCTSIZE2],
+        component: usize,
+        dc_table: &DerivedTable,
+        al: u8,
+    ) -> std::io::Result<()> {
+        // Get DC coefficient with point transform
+        let dc = block[0] >> al;
+
+        // Calculate difference from last DC
+        let diff = dc.wrapping_sub(self.last_dc_val[component]);
+        self.last_dc_val[component] = dc;
+
+        // Encode difference
+        let (nbits, value) = if diff < 0 {
+            let nbits = jpeg_nbits(diff);
+            let value = (diff as u16).wrapping_sub(1) & ((1u16 << nbits) - 1);
+            (nbits, value)
+        } else {
+            let nbits = jpeg_nbits(diff);
+            (nbits, diff as u16)
+        };
+
+        // Emit Huffman code for the category
+        let (code, size) = dc_table.get_code(nbits);
+        if size > 0 {
+            self.writer.put_bits(code, size)?;
+        }
+
+        // Emit the value bits
+        if nbits > 0 {
+            self.writer.put_bits(value as u32, nbits)?;
+        }
+
+        Ok(())
+    }
+
+    /// Encode a DC refinement scan (Ah != 0).
+    ///
+    /// Just outputs a single bit for each block.
+    pub fn encode_dc_refine(
+        &mut self,
+        block: &[i16; DCTSIZE2],
+        al: u8,
+    ) -> std::io::Result<()> {
+        // Output the next bit of DC coefficient
+        let bit = ((block[0] >> al) & 1) as u32;
+        self.writer.put_bits(bit, 1)?;
+        Ok(())
+    }
+
+    /// Encode an AC first scan (Ah=0).
+    ///
+    /// # Arguments
+    /// * `block` - DCT coefficients in natural order
+    /// * `ss` - Spectral selection start (1..63)
+    /// * `se` - Spectral selection end (1..63)
+    /// * `al` - Point transform (successive approximation low bit)
+    /// * `ac_table` - Huffman table for AC
+    pub fn encode_ac_first(
+        &mut self,
+        block: &[i16; DCTSIZE2],
+        ss: u8,
+        se: u8,
+        al: u8,
+        ac_table: &DerivedTable,
+    ) -> std::io::Result<()> {
+        // Find last non-zero coefficient in this band
+        let mut k = se;
+        while k >= ss {
+            if (block[JPEG_NATURAL_ORDER[k as usize]] >> al) != 0 {
+                break;
+            }
+            k -= 1;
+        }
+        let kex = k;
+
+        let mut run = 0u32;
+
+        for k in ss..=se {
+            let coef = block[JPEG_NATURAL_ORDER[k as usize]] >> al;
+
+            if coef == 0 {
+                run += 1;
+                continue;
+            }
+
+            // Flush any pending EOBRUN
+            if self.eobrun > 0 {
+                self.flush_eobrun(ac_table)?;
+            }
+
+            // Emit ZRL codes for runs of 16+ zeros
+            while run >= 16 {
+                let (code, size) = ac_table.get_code(0xF0);
+                self.writer.put_bits(code, size)?;
+                run -= 16;
+            }
+
+            // Calculate category (number of bits needed)
+            let nbits = jpeg_nbits(coef);
+
+            // Symbol = (run << 4) | nbits
+            let symbol = ((run as u8) << 4) | nbits;
+            let (code, size) = ac_table.get_code(symbol);
+            self.writer.put_bits(code, size)?;
+
+            // Emit value bits (sign bit first for negative)
+            if coef < 0 {
+                let value = (coef as u16).wrapping_sub(1) & ((1u16 << nbits) - 1);
+                self.writer.put_bits(value as u32, nbits)?;
+            } else {
+                self.writer.put_bits(coef as u32, nbits)?;
+            }
+
+            run = 0;
+
+            // Check if we've reached the last non-zero coefficient
+            if k == kex {
+                break;
+            }
+        }
+
+        // If we ended early, accumulate an EOB
+        if run > 0 || kex < ss {
+            self.eobrun += 1;
+            if self.eobrun == 0x7FFF {
+                self.flush_eobrun(ac_table)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Encode an AC refinement scan (Ah != 0).
+    ///
+    /// This is more complex because we need to:
+    /// 1. Output correction bits for previously non-zero coefficients
+    /// 2. Output new non-zero coefficients with their correction bits
+    pub fn encode_ac_refine(
+        &mut self,
+        block: &[i16; DCTSIZE2],
+        ss: u8,
+        se: u8,
+        al: u8,
+        ac_table: &DerivedTable,
+    ) -> std::io::Result<()> {
+        // Point to current coefficient
+        let mut k = ss;
+        let mut run = 0u32;
+        let mut pending_bits: Vec<u32> = Vec::new();
+
+        // Find last non-zero coefficient in the band
+        let mut kex = se;
+        while kex >= ss {
+            let coef = block[JPEG_NATURAL_ORDER[kex as usize]];
+            if coef != 0 {
+                break;
+            }
+            kex -= 1;
+        }
+
+        while k <= se {
+            let coef = block[JPEG_NATURAL_ORDER[k as usize]];
+            let abs_coef = coef.abs() as u16;
+
+            // Check if this is a previously-coded non-zero coefficient
+            if (abs_coef >> al) > 1 {
+                // Already coded - just output the refinement bit
+                pending_bits.push(((abs_coef >> al) & 1) as u32);
+            } else if (abs_coef >> al) == 1 {
+                // New non-zero coefficient
+                // Flush EOBRUN if needed
+                if self.eobrun > 0 {
+                    self.flush_eobrun(ac_table)?;
+                }
+
+                // Emit ZRL for runs of 16
+                while run >= 16 {
+                    // Emit ZRL with pending correction bits
+                    let (code, size) = ac_table.get_code(0xF0);
+                    self.writer.put_bits(code, size)?;
+
+                    // Output pending correction bits
+                    for &bit in &pending_bits {
+                        self.writer.put_bits(bit, 1)?;
+                    }
+                    pending_bits.clear();
+                    run -= 16;
+                }
+
+                // Emit the coefficient
+                let symbol = ((run as u8) << 4) | 1;
+                let (code, size) = ac_table.get_code(symbol);
+                self.writer.put_bits(code, size)?;
+
+                // Sign bit
+                let sign_bit = if coef < 0 { 0u32 } else { 1u32 };
+                self.writer.put_bits(sign_bit, 1)?;
+
+                // Output pending correction bits
+                for &bit in &pending_bits {
+                    self.writer.put_bits(bit, 1)?;
+                }
+                pending_bits.clear();
+                run = 0;
+            } else {
+                // Zero coefficient - increment run
+                run += 1;
+            }
+
+            k += 1;
+        }
+
+        // Handle remaining run (EOB)
+        if run > 0 {
+            self.eobrun += 1;
+            if self.eobrun == 0x7FFF {
+                self.flush_eobrun(ac_table)?;
+                for &bit in &pending_bits {
+                    self.writer.put_bits(bit, 1)?;
+                }
+                pending_bits.clear();
+            }
+        }
+
+        // Store pending bits for later flush
+        // Note: In a full implementation, we'd need to track these across blocks
+        // For now, flush them with the EOBRUN
+        if !pending_bits.is_empty() && self.eobrun > 0 {
+            self.flush_eobrun(ac_table)?;
+            for &bit in &pending_bits {
+                self.writer.put_bits(bit, 1)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Flush the EOB run to the bitstream.
+    fn flush_eobrun(&mut self, ac_table: &DerivedTable) -> std::io::Result<()> {
+        if self.eobrun == 0 {
+            return Ok(());
+        }
+
+        // Calculate EOBn symbol (n = log2(EOBRUN))
+        let nbits = if self.eobrun == 1 {
+            0
+        } else {
+            16 - (self.eobrun - 1).leading_zeros() as u8
+        };
+
+        // Symbol for EOBn is nbits << 4 (run=0)
+        let symbol = nbits << 4;
+        let (code, size) = ac_table.get_code(symbol);
+        self.writer.put_bits(code, size)?;
+
+        // Output additional bits for EOBRUN
+        if nbits > 0 {
+            let mask = (1u16 << nbits) - 1;
+            let extra = (self.eobrun - 1) & mask;
+            self.writer.put_bits(extra as u32, nbits)?;
+        }
+
+        self.eobrun = 0;
+        Ok(())
+    }
+
+    /// Finish the current scan, flushing any pending EOBRUN.
+    pub fn finish_scan(&mut self, ac_table: Option<&DerivedTable>) -> std::io::Result<()> {
+        if let Some(table) = ac_table {
+            self.flush_eobrun(table)?;
+        }
+        self.writer.flush()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

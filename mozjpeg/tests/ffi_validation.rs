@@ -157,3 +157,155 @@ fn test_all_quality_levels() {
         );
     }
 }
+
+/// Test that compares Rust encoder output directly against C mozjpeg.
+///
+/// Current status: Rust encoder produces valid JPEG files but with different
+/// characteristics than C mozjpeg. This test documents the current state.
+#[test]
+fn test_rust_vs_c_mozjpeg_encoder() {
+    use mozjpeg::{Encoder, Subsampling};
+
+    // Create a test image (64x64 gradient)
+    let width = 64u32;
+    let height = 64u32;
+    let mut rgb_data = vec![0u8; (width * height * 3) as usize];
+
+    for y in 0..height {
+        for x in 0..width {
+            let i = (y * width + x) as usize;
+            rgb_data[i * 3] = (x * 4) as u8;     // R gradient
+            rgb_data[i * 3 + 1] = (y * 4) as u8; // G gradient
+            rgb_data[i * 3 + 2] = 128;           // B constant
+        }
+    }
+
+    println!("\n=== Rust vs C mozjpeg encoder comparison ===\n");
+
+    for quality in [50, 75, 85] {
+        // Encode with Rust implementation
+        let rust_encoder = Encoder::new()
+            .quality(quality)
+            .subsampling(Subsampling::S420);
+        let rust_jpeg = rust_encoder.encode_rgb(&rgb_data, width, height).unwrap();
+
+        // Encode with C mozjpeg
+        let c_jpeg = unsafe {
+            encode_with_c_mozjpeg(&rgb_data, width, height, quality)
+        };
+
+        // Verify both produce valid JPEG files
+        assert!(rust_jpeg.len() > 100, "Rust JPEG too small");
+        assert!(c_jpeg.len() > 100, "C JPEG too small");
+        assert_eq!(rust_jpeg[0..2], [0xFF, 0xD8], "Rust JPEG missing SOI");
+        assert_eq!(c_jpeg[0..2], [0xFF, 0xD8], "C JPEG missing SOI");
+
+        // Decode both to verify they're valid
+        let mut rust_decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&rust_jpeg));
+        let rust_decoded = rust_decoder.decode().expect("Failed to decode Rust JPEG");
+
+        let mut c_decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&c_jpeg));
+        let c_decoded = c_decoder.decode().expect("Failed to decode C JPEG");
+
+        // Calculate PSNR between original and decoded
+        let rust_psnr = calculate_psnr(&rgb_data, &rust_decoded);
+        let c_psnr = calculate_psnr(&rgb_data, &c_decoded);
+
+        // Calculate similarity between the two decoded outputs
+        let decoded_psnr = calculate_psnr(&rust_decoded, &c_decoded);
+
+        let size_ratio = rust_jpeg.len() as f64 / c_jpeg.len() as f64;
+
+        println!("Q{:2}:", quality);
+        println!("  File size: Rust={:5} bytes, C={:5} bytes (ratio: {:.2}x)",
+                 rust_jpeg.len(), c_jpeg.len(), size_ratio);
+        println!("  PSNR vs original: Rust={:.2} dB, C={:.2} dB", rust_psnr, c_psnr);
+        println!("  PSNR Rust vs C decoded: {:.2} dB (higher = more similar)", decoded_psnr);
+
+        // Report status (don't fail - this is informational)
+        if rust_psnr < 20.0 {
+            println!("  ⚠️  Rust PSNR is low - encoding quality needs investigation");
+        }
+        if size_ratio > 2.0 {
+            println!("  ⚠️  Rust output is significantly larger than C mozjpeg");
+        }
+        println!();
+    }
+
+    // Minimal assertions - just verify encoding works
+    println!("Status: Both encoders produce valid, decodable JPEG files.");
+    println!("Note: Quality/size differences require further investigation.");
+}
+
+/// Helper: Encode using C mozjpeg via FFI (uses crates.io mozjpeg-sys)
+unsafe fn encode_with_c_mozjpeg(rgb_data: &[u8], width: u32, height: u32, quality: u8) -> Vec<u8> {
+    use std::ptr;
+
+    // Output buffer
+    let mut outbuffer: *mut u8 = ptr::null_mut();
+    let mut outsize: std::ffi::c_ulong = 0;
+
+    // Create compression struct
+    let mut cinfo = std::mem::zeroed::<mozjpeg_sys::jpeg_compress_struct>();
+    let mut jerr = std::mem::zeroed::<mozjpeg_sys::jpeg_error_mgr>();
+
+    cinfo.common.err = mozjpeg_sys::jpeg_std_error(&mut jerr);
+    mozjpeg_sys::jpeg_CreateCompress(
+        &mut cinfo,
+        mozjpeg_sys::JPEG_LIB_VERSION as i32,
+        std::mem::size_of::<mozjpeg_sys::jpeg_compress_struct>(),
+    );
+
+    // Set up memory destination
+    mozjpeg_sys::jpeg_mem_dest(&mut cinfo, &mut outbuffer, &mut outsize);
+
+    // Set image parameters
+    cinfo.image_width = width;
+    cinfo.image_height = height;
+    cinfo.input_components = 3;
+    cinfo.in_color_space = mozjpeg_sys::J_COLOR_SPACE::JCS_RGB;
+
+    mozjpeg_sys::jpeg_set_defaults(&mut cinfo);
+    mozjpeg_sys::jpeg_set_quality(&mut cinfo, quality as i32, 1); // force_baseline=true
+
+    // Start compression
+    mozjpeg_sys::jpeg_start_compress(&mut cinfo, 1);
+
+    // Write scanlines
+    let row_stride = (width * 3) as usize;
+    while cinfo.next_scanline < cinfo.image_height {
+        let row_ptr = rgb_data.as_ptr().add(cinfo.next_scanline as usize * row_stride);
+        let mut row_array = [row_ptr as *const u8];
+        mozjpeg_sys::jpeg_write_scanlines(&mut cinfo, row_array.as_mut_ptr() as *mut *const u8, 1);
+    }
+
+    mozjpeg_sys::jpeg_finish_compress(&mut cinfo);
+    mozjpeg_sys::jpeg_destroy_compress(&mut cinfo);
+
+    // Copy output to Vec
+    let result = std::slice::from_raw_parts(outbuffer, outsize as usize).to_vec();
+
+    // Free the C-allocated buffer
+    libc::free(outbuffer as *mut std::ffi::c_void);
+
+    result
+}
+
+/// Calculate PSNR between two images
+fn calculate_psnr(img1: &[u8], img2: &[u8]) -> f64 {
+    assert_eq!(img1.len(), img2.len());
+
+    let mse: f64 = img1.iter()
+        .zip(img2.iter())
+        .map(|(&a, &b)| {
+            let diff = a as f64 - b as f64;
+            diff * diff
+        })
+        .sum::<f64>() / img1.len() as f64;
+
+    if mse == 0.0 {
+        return f64::INFINITY;
+    }
+
+    10.0 * (255.0 * 255.0 / mse).log10()
+}

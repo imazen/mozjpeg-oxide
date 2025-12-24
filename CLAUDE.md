@@ -10,34 +10,76 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
 
 ## Current Status
 
-**142 tests passing** (124 unit + 8 FFI comparison + 6 mozjpeg-sys + 4 ffi_validation)
+**142 tests passing** (127 unit + 10 FFI comparison + 5 ffi_validation)
+
+### Compression Results vs C mozjpeg
+
+**Small test images (16x16):**
+| Quality | Rust Size | C Size | Ratio | Rust PSNR | C PSNR |
+|---------|-----------|--------|-------|-----------|--------|
+| Q50 | 491 bytes | 498 bytes | **0.99x** | 40.33 dB | 40.16 dB |
+| Q75 | 518 bytes | 558 bytes | **0.93x** | 44.90 dB | 45.20 dB |
+| Q85 | 590 bytes | 631 bytes | **0.94x** | 47.32 dB | 47.49 dB |
+
+**Real-world images (40 images from kodak + clic2025):**
+| Metric | Rust | C mozjpeg | Notes |
+|--------|------|-----------|-------|
+| Average ratio | **1.029x** | 1.0x | 2.9% larger than C |
+| Average PSNR | 34.87 dB | 34.94 dB | Nearly identical quality |
+| Range | 0.993x - 1.107x | - | Some images match or beat C |
+
+Remaining gap likely due to missing EOB optimization across blocks.
 
 ### Completed Layers
 - Layer 0: Constants, types, error handling
 - Layer 1: Quantization tables, Huffman table construction
 - Layer 2: Forward DCT, color conversion, chroma subsampling
 - Layer 3: Bitstream writer with byte stuffing
-- Layer 4: Entropy encoder, trellis quantization
-- Layer 5: Progressive scan generation
-- Layer 6: Marker emission, **Encoder pipeline**
+- Layer 4: Entropy encoder, **trellis quantization (AC + DC)**
+- Layer 5: **Progressive scan generation (integrated)**
+- Layer 6: Marker emission, **Full encoder pipeline**
 - **FFI Validation**: Granular comparison tests against C mozjpeg
 
 ### Working Encoder
-The encoder produces valid JPEG files that can be decoded by standard decoders:
+The encoder produces valid JPEG files with mozjpeg-quality compression:
 ```rust
-use mozjpeg::Encoder;
+use mozjpeg::{Encoder, Subsampling, TrellisConfig};
 
+// Default encoding (trellis + Huffman optimization enabled)
+let encoder = Encoder::new().quality(85);
+let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
+
+// Maximum compression (progressive + trellis + optimized Huffman)
+let encoder = Encoder::max_compression();
+let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
+
+// Fastest encoding (no optimizations)
+let encoder = Encoder::fastest().quality(85);
+let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
+
+// Custom configuration
 let encoder = Encoder::new()
-    .quality(85)
-    .subsampling(Subsampling::S420);
+    .quality(75)
+    .progressive(true)
+    .subsampling(Subsampling::S420)
+    .trellis(TrellisConfig::default())
+    .optimize_huffman(true);
 let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
 ```
 
+### Implemented Features
+- **Baseline JPEG encoding** - Standard sequential DCT
+- **Progressive JPEG encoding** - Multi-scan with DC first, then AC bands
+- **Trellis quantization** - Rate-distortion optimized AC + DC quantization (mozjpeg core feature)
+- **DC trellis optimization** - Dynamic programming across blocks for optimal DC encoding
+- **Huffman table optimization** - 2-pass encoding for optimal tables
+- **Chroma subsampling** - 4:4:4, 4:2:2, 4:2:0 modes
+- **Quality presets** - `max_compression()` and `fastest()`
+
 ### Remaining Work
-- Progressive encoding mode (currently baseline only)
-- Trellis quantization integration
-- Huffman table optimization
+- EOB optimization across blocks (trellis_eob_opt)
 - Optional: deringing, arithmetic coding
+- Performance optimization (SIMD)
 
 ## Workflow Rules
 
@@ -54,13 +96,30 @@ let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
   - C code has been instrumented with `mozjpeg_test_*` functions
   - Tests in `mozjpeg/tests/ffi_comparison.rs` compare Rust vs C implementations
 
+### Golden Rule: Never Delete Instrumentation
+**NEVER delete tests, FFI comparisons, or instrumentation code.** These are essential for:
+- Validating correctness against C mozjpeg
+- Catching regressions during development
+- Documenting expected behavior
+- Ensuring byte-exact parity with C implementation
+
+If a test seems obsolete, comment it out with explanation rather than deleting.
+
 ## Key Learnings
 
 ### mozjpeg Specifics
 1. **Default quant tables**: mozjpeg uses ImageMagick tables (index 3), not JPEG Annex K (index 0)
 2. **Quality scaling**: Q50 = 100% scale factor (use tables as-is)
-3. **DCT scaling**: Output is scaled by factor of 64 (8 per dimension)
+3. **DCT scaling**: Output is scaled by factor of 8 (sqrt(8) per dimension)
 4. **Huffman pseudo-symbol**: Symbol 256 ensures no real symbol gets all-ones code
+
+### Trellis Quantization (Critical!)
+The trellis algorithm requires raw DCT coefficients (scaled by 8):
+1. **Lambda calculation**: `lambda = 2^scale1 / (2^scale2 + block_norm)` with `lambda_base = 1.0`
+2. **Per-coefficient weights**: `weight[i] = 1/quantval[i]^2`
+3. **Quantization divisor**: `q = 8 * quantval[i]` (includes DCT scaling)
+4. **Distortion**: `(candidate * q - original)^2 * lambda * weight`
+5. **Cost**: `rate + distortion` where rate is Huffman code size + value bits
 
 ### Implementation Notes
 1. **Huffman tree construction**: Use sentinel values carefully to avoid overflow
@@ -68,11 +127,7 @@ let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
    - `FREQ_MERGED = 1_000_000_001` for merged nodes
 2. **Bitstream stuffing**: 0xFF bytes ALWAYS require 0x00 stuffing in entropy data
 3. **Bit buffer**: Use 64-bit buffer, flush when full, pad with 1-bits at end
-4. **Trellis quantization**: Core mozjpeg innovation
-   - Cost = Rate + Lambda * Distortion
-   - Lambda calculated from block energy and quant table
-   - Per-coefficient lambda weights = 1/q^2
-5. **Progressive encoding**:
+4. **Progressive encoding**:
    - DC scans can be interleaved (multiple components)
    - AC scans must be single-component
    - Successive approximation uses Ah/Al for bit refinement

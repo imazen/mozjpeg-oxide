@@ -3,19 +3,20 @@
 //! This library provides a high-quality JPEG encoder with features from mozjpeg:
 //! - Trellis quantization for optimal rate-distortion
 //! - Progressive JPEG with optimized scan order
-//! - Overshoot deringing for cleaner edges
+//! - Huffman table optimization (2-pass encoding)
 //! - Multiple perceptual quantization table variants
 //!
 //! # Example
 //!
 //! ```ignore
-//! use mozjpeg::{Encoder, ColorSpace};
+//! use mozjpeg::{Encoder, Subsampling};
 //!
 //! let encoder = Encoder::new()
-//!     .set_quality(85)
-//!     .set_progressive(true);
+//!     .quality(85)
+//!     .progressive(true)
+//!     .subsampling(Subsampling::S420);
 //!
-//! let jpeg_data = encoder.encode(&rgb_pixels, width, height, ColorSpace::Rgb)?;
+//! let jpeg_data = encoder.encode_rgb(&rgb_pixels, width, height)?;
 //! ```
 
 pub mod bitstream;
@@ -73,7 +74,7 @@ pub use huffman::{
 
 pub use bitstream::{BitWriter, VecBitWriter};
 
-pub use entropy::{EntropyEncoder, encode_block_standalone, jpeg_nbits};
+pub use entropy::{EntropyEncoder, ProgressiveEncoder, SymbolCounter, encode_block_standalone, jpeg_nbits};
 
 pub use sample::{
     downsample_h2v1_row, downsample_h2v2_rows, downsample_plane,

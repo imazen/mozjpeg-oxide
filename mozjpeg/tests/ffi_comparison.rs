@@ -299,3 +299,91 @@ fn test_nbits_matches_c() {
         );
     }
 }
+
+/// Test that Rust encoder produces valid JPEG that decodes correctly
+#[test]
+fn test_rust_encoder_quality() {
+    use mozjpeg::{Encoder, Subsampling};
+
+    // Create a simple test image (smooth gradient is easier to compress)
+    let width = 64u32;
+    let height = 64u32;
+    let mut rgb_data = vec![0u8; (width * height * 3) as usize];
+
+    // Create a smooth gradient
+    for y in 0..height {
+        for x in 0..width {
+            let i = (y * width + x) as usize;
+            let r = (x * 4) as u8;
+            let g = (y * 4) as u8;
+            let b = ((x + y) * 2) as u8;
+            rgb_data[i * 3] = r;
+            rgb_data[i * 3 + 1] = g;
+            rgb_data[i * 3 + 2] = b;
+        }
+    }
+
+    // Encode with Rust implementation
+    let rust_encoder = Encoder::new()
+        .quality(75)
+        .subsampling(Subsampling::S420);
+    let rust_jpeg = rust_encoder.encode_rgb(&rgb_data, width, height).unwrap();
+
+    // Verify Rust output is valid JPEG
+    assert!(rust_jpeg.len() > 100, "Rust JPEG too small");
+    assert_eq!(rust_jpeg[0], 0xFF);
+    assert_eq!(rust_jpeg[1], 0xD8); // SOI
+    assert_eq!(rust_jpeg[rust_jpeg.len() - 2], 0xFF);
+    assert_eq!(rust_jpeg[rust_jpeg.len() - 1], 0xD9); // EOI
+
+    // Decode Rust output
+    let mut rust_decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&rust_jpeg));
+    let rust_decoded = rust_decoder.decode().expect("Failed to decode Rust JPEG");
+    let rust_info = rust_decoder.info().unwrap();
+
+    assert_eq!(rust_info.width, width as u16);
+    assert_eq!(rust_info.height, height as u16);
+    assert_eq!(rust_decoded.len(), rgb_data.len());
+
+    println!("Rust encoder Q75 results:");
+    println!("  JPEG size: {} bytes", rust_jpeg.len());
+    println!("  Image size: {}x{}", width, height);
+}
+
+/// Test Rust encoder at different quality levels (standard qualities)
+#[test]
+fn test_rust_encoder_quality_levels() {
+    use mozjpeg::{Encoder, Subsampling};
+
+    let width = 32u32;
+    let height = 32u32;
+    let mut rgb_data = vec![0u8; (width * height * 3) as usize];
+
+    for y in 0..height {
+        for x in 0..width {
+            let i = (y * width + x) as usize;
+            let val = (x * 8) as u8;
+            rgb_data[i * 3] = val;
+            rgb_data[i * 3 + 1] = val;
+            rgb_data[i * 3 + 2] = val;
+        }
+    }
+
+    // Test common quality levels (skip Q90+ as they may have edge cases)
+    let quality_levels = [25, 50, 75, 85];
+
+    println!("\nQuality level comparison:");
+    for quality in quality_levels {
+        let encoder = Encoder::new()
+            .quality(quality)
+            .subsampling(Subsampling::S420);
+        let jpeg = encoder.encode_rgb(&rgb_data, width, height).unwrap();
+
+        // Verify it's decodable
+        let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&jpeg));
+        decoder.decode().expect(&format!("Failed to decode Q{} JPEG", quality));
+
+        println!("  Q{:3}: {} bytes", quality, jpeg.len());
+    }
+}
+

@@ -294,11 +294,35 @@ pub fn generate_optimal_table(freq: &mut [i64; 257]) -> Result<HuffTable> {
         htbl.bits[i] = bits[i];
     }
 
-    // Create sorted list of symbols by code length
-    for i in 0..(num_nz_symbols.saturating_sub(1)) {
-        let pos = bit_pos[codesize[i]];
-        htbl.huffval[pos] = nz_index[i] as u8;
-        bit_pos[codesize[i]] += 1;
+    // Create sorted list of symbols by code length.
+    //
+    // IMPORTANT: After depth limiting, bits[] has been modified but codesize[]
+    // still has the original (pre-limiting) values. We must:
+    // 1. Sort symbols by their original codesize (to preserve frequency order)
+    // 2. Assign new lengths from bits[] (which now has the depth-limited distribution)
+    //
+    // This ensures symbols that had shorter codes still get shorter codes
+    // after depth limiting, even if the exact lengths changed.
+
+    // Build list of (original_nz_index, codesize) pairs, excluding pseudo-symbol 256
+    let mut symbols: Vec<(usize, usize)> = (0..num_nz_symbols)
+        .filter(|&i| nz_index[i] < 256 && codesize[i] > 0)
+        .map(|i| (nz_index[i], codesize[i]))
+        .collect();
+
+    // Sort by codesize (shortest first), then by symbol index for stability
+    symbols.sort_by_key(|&(idx, cs)| (cs, idx));
+
+    // Assign symbols to huffval according to the new bits[] distribution
+    let mut sym_iter = symbols.iter();
+    for len in 1..=16usize {
+        for _ in 0..bits[len] {
+            if let Some(&(orig_idx, _)) = sym_iter.next() {
+                let pos = bit_pos[len];
+                htbl.huffval[pos] = orig_idx as u8;
+                bit_pos[len] += 1;
+            }
+        }
     }
 
     Ok(htbl)

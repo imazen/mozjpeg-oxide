@@ -14,6 +14,7 @@ bytemuck = { workspace = true }
 
 [dev-dependencies]
 dssim = { workspace = true }
+rgb = { workspace = true }
 ssimulacra2 = { workspace = true }
 png = { workspace = true }
 proptest = { workspace = true }

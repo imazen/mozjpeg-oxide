@@ -14,6 +14,7 @@ bytemuck = "1.14"
 
 # Testing & Quality Metrics
 dssim = "3.2"
+rgb = "0.8"  # Required by dssim for RGB8 type
 ssimulacra2 = "0.5"
 png = "0.17"
 proptest = "1.4"

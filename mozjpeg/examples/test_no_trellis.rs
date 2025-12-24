@@ -23,27 +23,102 @@ fn main() {
         _ => panic!("Unsupported"),
     };
 
-    // Rust with trellis disabled
-    let encoder = mozjpeg::Encoder::new()
-        .quality(75)
-        .trellis(mozjpeg::TrellisConfig::disabled());
-    let rust_no_trellis = encoder.encode_rgb(&rgb_data, width, height).unwrap();
+    // Rust with max_compression (progressive + trellis)
+    let encoder = mozjpeg::Encoder::max_compression().quality(75);
+    let rust_progressive = encoder.encode_rgb(&rgb_data, width, height).unwrap();
 
-    // Rust with trellis enabled (default)
+    // Rust baseline with trellis enabled (default)
     let encoder = mozjpeg::Encoder::new().quality(75);
-    let rust_with_trellis = encoder.encode_rgb(&rgb_data, width, height).unwrap();
+    let rust_baseline = encoder.encode_rgb(&rgb_data, width, height).unwrap();
 
-    // C mozjpeg with defaults (trellis disabled by default)
+    // C mozjpeg with defaults (JCP_MAX_COMPRESSION = progressive + trellis)
     let c_jpeg = encode_c(&rgb_data, width, height, 75);
 
-    println!("Rust (no trellis):   {} bytes", rust_no_trellis.len());
-    println!("Rust (with trellis): {} bytes", rust_with_trellis.len());
-    println!("C mozjpeg:           {} bytes", c_jpeg.len());
+    println!("Rust (progressive+trellis): {} bytes", rust_progressive.len());
+    println!("Rust (baseline+trellis):    {} bytes", rust_baseline.len());
+    println!("C mozjpeg:                  {} bytes", c_jpeg.len());
     println!();
-    println!("Ratio (Rust no trellis / C): {:.4}", 
-             rust_no_trellis.len() as f64 / c_jpeg.len() as f64);
-    println!("Ratio (Rust trellis / C):    {:.4}", 
-             rust_with_trellis.len() as f64 / c_jpeg.len() as f64);
+    println!("Ratio (Rust progressive / C): {:.4}",
+             rust_progressive.len() as f64 / c_jpeg.len() as f64);
+    println!("Ratio (Rust baseline / C):    {:.4}",
+             rust_baseline.len() as f64 / c_jpeg.len() as f64);
+
+    // Save files for analysis
+    fs::write("/tmp/rust_progressive.jpg", &rust_progressive).unwrap();
+    fs::write("/tmp/c_mozjpeg.jpg", &c_jpeg).unwrap();
+    println!();
+    println!("Files saved to /tmp/rust_progressive.jpg and /tmp/c_mozjpeg.jpg");
+
+    // Count SOS markers (number of scans)
+    let rust_scans = rust_progressive.windows(2).filter(|w| *w == [0xFF, 0xDA]).count();
+    let c_scans = c_jpeg.windows(2).filter(|w| *w == [0xFF, 0xDA]).count();
+    println!();
+    println!("Rust scan count: {}", rust_scans);
+    println!("C scan count:    {}", c_scans);
+
+    // Decode all and compare PSNR
+    let rust_prog_decoded = decode_jpeg(&rust_progressive);
+    let rust_base_decoded = decode_jpeg(&rust_baseline);
+    let c_decoded = decode_jpeg(&c_jpeg);
+
+    let psnr_rust_prog = calculate_psnr(&rgb_data, &rust_prog_decoded);
+    let psnr_rust_base = calculate_psnr(&rgb_data, &rust_base_decoded);
+    let psnr_c = calculate_psnr(&rgb_data, &c_decoded);
+    println!();
+    println!("Rust progressive PSNR: {:.2} dB", psnr_rust_prog);
+    println!("Rust baseline PSNR:    {:.2} dB", psnr_rust_base);
+    println!("C PSNR:                {:.2} dB", psnr_c);
+
+    // Also test a small 16x16 image
+    println!();
+    println!("=== Testing small 16x16 image ===");
+    let small_w = 16u32;
+    let small_h = 16u32;
+    let mut small_rgb = vec![128u8; (small_w * small_h * 3) as usize];
+    for y in 0..small_h {
+        for x in 0..small_w {
+            let i = (y * small_w + x) as usize;
+            small_rgb[i*3] = ((x * 16) % 256) as u8;
+            small_rgb[i*3+1] = ((y * 16) % 256) as u8;
+            small_rgb[i*3+2] = 128;
+        }
+    }
+
+    let small_prog = mozjpeg::Encoder::max_compression()
+        .quality(85)
+        .encode_rgb(&small_rgb, small_w, small_h).unwrap();
+    let small_base = mozjpeg::Encoder::new()
+        .quality(85)
+        .encode_rgb(&small_rgb, small_w, small_h).unwrap();
+
+    let small_prog_dec = decode_jpeg(&small_prog);
+    let small_base_dec = decode_jpeg(&small_base);
+
+    let small_prog_psnr = calculate_psnr(&small_rgb, &small_prog_dec);
+    let small_base_psnr = calculate_psnr(&small_rgb, &small_base_dec);
+
+    println!("Small image progressive PSNR: {:.2} dB", small_prog_psnr);
+    println!("Small image baseline PSNR:    {:.2} dB", small_base_psnr);
+}
+
+fn decode_jpeg(data: &[u8]) -> Vec<u8> {
+    let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(data));
+    decoder.decode().unwrap()
+}
+
+fn calculate_psnr(original: &[u8], decoded: &[u8]) -> f64 {
+    let mse: f64 = original.iter()
+        .zip(decoded.iter())
+        .map(|(&a, &b)| {
+            let diff = a as f64 - b as f64;
+            diff * diff
+        })
+        .sum::<f64>() / original.len() as f64;
+
+    if mse == 0.0 {
+        return f64::INFINITY;
+    }
+    10.0 * (255.0_f64 * 255.0 / mse).log10()
 }
 
 fn encode_c(rgb: &[u8], width: u32, height: u32, quality: i32) -> Vec<u8> {

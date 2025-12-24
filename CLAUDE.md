@@ -47,9 +47,8 @@ mode. Use `Encoder::max_compression()` for equivalent behavior.
 - Trellis quantization is competitive or faster
 
 **\* Progressive mode note:** C mozjpeg **requires** `optimize_scans=true` for progressive
-encoding to work. This feature tries multiple scan configurations to find the best one.
-Rust doesn't implement `optimize_scans` yet, so C is doing extra work that Rust isn't.
-The progressive comparison isn't fully apples-to-apples.
+encoding to work. Both Rust and C now support `optimize_scans` which tries multiple scan
+configurations to find the smallest output.
 
 ### Completed Layers
 - Layer 0: Constants, types, error handling
@@ -100,7 +99,6 @@ let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
 - **Optimize scans** - Try multiple scan configurations for progressive mode, pick smallest
 
 ### Remaining Work
-- **XYB colorspace Huffman optimization** - Perceptual colorspace for better compression
 - EOB optimization integration (`trellis_eob_opt` - disabled by default in C mozjpeg)
 - Arithmetic coding (optional, rarely used)
 - Performance optimization (SIMD)

@@ -425,6 +425,8 @@ impl Encoder {
                     &y_blocks, &cb_blocks, &cr_blocks,
                     mcu_rows, mcu_cols,
                     luma_h, luma_v,
+                    width, height,
+                    chroma_width, chroma_height,
                     &dc_luma_derived, &dc_chroma_derived,
                     &ac_luma_derived, &ac_chroma_derived,
                 )?
@@ -462,10 +464,17 @@ impl Encoder {
                             _ => &y_blocks,
                         };
                         let ac_freq = if comp_idx == 0 { &mut ac_luma_freq } else { &mut ac_chroma_freq };
+                        // Calculate actual block dimensions for this component
+                        let (actual_block_cols, actual_block_rows) = if comp_idx == 0 {
+                            ((width + DCTSIZE - 1) / DCTSIZE, (height + DCTSIZE - 1) / DCTSIZE)
+                        } else {
+                            ((chroma_width + DCTSIZE - 1) / DCTSIZE, (chroma_height + DCTSIZE - 1) / DCTSIZE)
+                        };
                         self.count_ac_scan_symbols(
                             scan, blocks,
                             mcu_rows, mcu_cols,
                             luma_h, luma_v, comp_idx,
+                            actual_block_cols, actual_block_rows,
                             ac_freq,
                         );
                     }
@@ -523,6 +532,8 @@ impl Encoder {
                     &y_blocks, &cb_blocks, &cr_blocks,
                     mcu_rows, mcu_cols,
                     luma_h, luma_v,
+                    width, height,
+                    chroma_width, chroma_height,
                     &opt_dc_luma, &opt_dc_chroma,
                     &opt_ac_luma, &opt_ac_chroma,
                     &mut prog_encoder,
@@ -1018,6 +1029,10 @@ impl Encoder {
         mcu_rows: usize,
         mcu_cols: usize,
         h_samp: u8, v_samp: u8,
+        actual_width: usize,
+        actual_height: usize,
+        chroma_width: usize,
+        chroma_height: usize,
         dc_luma: &DerivedTable,
         dc_chroma: &DerivedTable,
         ac_luma: &DerivedTable,
@@ -1035,6 +1050,8 @@ impl Encoder {
                 y_blocks, cb_blocks, cr_blocks,
                 mcu_rows, mcu_cols,
                 h_samp, v_samp,
+                actual_width, actual_height,
+                chroma_width, chroma_height,
                 dc_luma, dc_chroma,
                 ac_luma, ac_chroma,
             )?;
@@ -1060,6 +1077,10 @@ impl Encoder {
         mcu_rows: usize,
         mcu_cols: usize,
         h_samp: u8, v_samp: u8,
+        actual_width: usize,
+        actual_height: usize,
+        chroma_width: usize,
+        chroma_height: usize,
         dc_luma: &DerivedTable,
         dc_chroma: &DerivedTable,
         ac_luma: &DerivedTable,
@@ -1075,6 +1096,8 @@ impl Encoder {
             y_blocks, cb_blocks, cr_blocks,
             mcu_rows, mcu_cols,
             h_samp, v_samp,
+            actual_width, actual_height,
+            chroma_width, chroma_height,
             dc_luma, dc_chroma,
             ac_luma, ac_chroma,
             &mut prog_encoder,
@@ -1107,6 +1130,10 @@ impl Encoder {
         mcu_rows: usize,
         mcu_cols: usize,
         h_samp: u8, v_samp: u8,
+        actual_width: usize,
+        actual_height: usize,
+        chroma_width: usize,
+        chroma_height: usize,
         dc_luma: &DerivedTable,
         dc_chroma: &DerivedTable,
         ac_luma: &DerivedTable,
@@ -1126,7 +1153,8 @@ impl Encoder {
                 encoder,
             )?;
         } else {
-            // AC scan - single component only
+            // AC scan - single component only (non-interleaved)
+            // For non-interleaved scans, use actual component block dimensions
             let comp_idx = scan.component_index[0] as usize;
             let blocks = match comp_idx {
                 0 => y_blocks,
@@ -1136,9 +1164,19 @@ impl Encoder {
             };
             let ac_table = if comp_idx == 0 { ac_luma } else { ac_chroma };
 
+            // Calculate actual block dimensions for this component
+            let (actual_block_cols, actual_block_rows) = if comp_idx == 0 {
+                // Y component: full resolution
+                ((actual_width + DCTSIZE - 1) / DCTSIZE, (actual_height + DCTSIZE - 1) / DCTSIZE)
+            } else {
+                // Chroma components: subsampled resolution
+                ((chroma_width + DCTSIZE - 1) / DCTSIZE, (chroma_height + DCTSIZE - 1) / DCTSIZE)
+            };
+
             self.encode_ac_scan(
                 scan, blocks,
                 mcu_rows, mcu_cols, h_samp, v_samp, comp_idx,
+                actual_block_cols, actual_block_rows,
                 ac_table,
                 is_refinement,
                 encoder,
@@ -1207,9 +1245,9 @@ impl Encoder {
     /// must be encoded in component raster order (row-major within the component's
     /// block grid), NOT in MCU-interleaved order.
     ///
-    /// For Y with 2x2 sampling in a 2-MCU-wide image:
-    /// - Storage order (MCU): [0,1,2,3], [4,5,6,7] where within MCU: [(0,0),(0,1),(1,0),(1,1)]
-    /// - Raster order: [(0,0),(0,1),(0,2),(0,3)], [(1,0),(1,1),(1,2),(1,3)]
+    /// For non-interleaved scans, the number of blocks is determined by the actual
+    /// component dimensions (ceil(width/8) × ceil(height/8)), NOT the MCU-padded
+    /// dimensions. This is different from interleaved DC scans which use MCU order.
     ///
     /// Reference: ITU-T T.81 Section F.2.3 - "The scan data for a non-interleaved
     /// scan shall consist of a sequence of entropy-coded segments... The data units
@@ -1223,6 +1261,8 @@ impl Encoder {
         mcu_cols: usize,
         h_samp: u8, v_samp: u8,
         comp_idx: usize,
+        actual_block_cols: usize,
+        actual_block_rows: usize,
         ac_table: &DerivedTable,
         is_refinement: bool,
         encoder: &mut ProgressiveEncoder<W>,
@@ -1239,7 +1279,9 @@ impl Encoder {
 
         if blocks_per_mcu == 1 {
             // Chroma or 4:4:4 Y: storage order = raster order
-            for block in blocks.iter() {
+            // Only encode actual_block_rows × actual_block_cols blocks
+            let total_actual = actual_block_rows * actual_block_cols;
+            for block in blocks.iter().take(total_actual) {
                 if is_refinement {
                     encoder.encode_ac_refine(block, scan.ss, scan.se, scan.al, ac_table)?;
                 } else {
@@ -1249,13 +1291,12 @@ impl Encoder {
         } else {
             // Y component with subsampling (h_samp > 1 or v_samp > 1)
             // Convert from MCU-interleaved storage to component raster order
+            // Use actual block dimensions, not MCU-padded dimensions
             let h = h_samp as usize;
             let v = v_samp as usize;
-            let total_block_cols = mcu_cols * h;
-            let total_block_rows = mcu_rows * v;
 
-            for block_row in 0..total_block_rows {
-                for block_col in 0..total_block_cols {
+            for block_row in 0..actual_block_rows {
+                for block_col in 0..actual_block_cols {
                     // Convert raster position to MCU-interleaved storage index
                     let mcu_row = block_row / v;
                     let mcu_col = block_col / h;
@@ -1325,6 +1366,8 @@ impl Encoder {
     ///
     /// Must iterate blocks in the same order as `encode_ac_scan` (component raster order)
     /// to ensure EOBRUN counts match and Huffman tables are correct.
+    ///
+    /// Uses actual block dimensions (not MCU-padded) for non-interleaved scans.
     #[allow(clippy::too_many_arguments)]
     fn count_ac_scan_symbols(
         &self,
@@ -1334,6 +1377,8 @@ impl Encoder {
         mcu_cols: usize,
         h_samp: u8, v_samp: u8,
         comp_idx: usize,
+        actual_block_cols: usize,
+        actual_block_rows: usize,
         ac_freq: &mut FrequencyCounter,
     ) {
         let blocks_per_mcu = if comp_idx == 0 {
@@ -1346,18 +1391,19 @@ impl Encoder {
 
         if blocks_per_mcu == 1 {
             // Chroma or 4:4:4 Y: storage order = raster order
-            for block in blocks.iter() {
+            // Only count actual_block_rows × actual_block_cols blocks
+            let total_actual = actual_block_rows * actual_block_cols;
+            for block in blocks.iter().take(total_actual) {
                 counter.count_ac_first(block, scan.ss, scan.se, scan.al, ac_freq);
             }
         } else {
             // Y component with subsampling - iterate in raster order (matching encode_ac_scan)
+            // Use actual block dimensions, not MCU-padded dimensions
             let h = h_samp as usize;
             let v = v_samp as usize;
-            let total_block_cols = mcu_cols * h;
-            let total_block_rows = mcu_rows * v;
 
-            for block_row in 0..total_block_rows {
-                for block_col in 0..total_block_cols {
+            for block_row in 0..actual_block_rows {
+                for block_col in 0..actual_block_cols {
                     // Convert raster position to MCU-interleaved storage index
                     let mcu_row = block_row / v;
                     let mcu_col = block_col / h;
@@ -1468,13 +1514,22 @@ fn write_sos_marker<W: Write>(
     output.write_all(&[scan.comps_in_scan])?;
 
     // Component selector + Huffman table selectors for each component
+    // Per JPEG spec (ITU-T T.81):
+    // - For DC scans (Ss=0, Se=0): Ta (AC table) must be 0
+    // - For AC scans (Ss>0): Td (DC table) must be 0
+    let is_dc_scan = scan.ss == 0 && scan.se == 0;
+
     for i in 0..scan.comps_in_scan as usize {
         let comp_idx = scan.component_index[i] as usize;
         let comp = &components[comp_idx];
-        output.write_all(&[
-            comp.component_id,
-            (comp.dc_tbl_no << 4) | comp.ac_tbl_no,
-        ])?;
+        let table_selector = if is_dc_scan {
+            // DC scan: Td = dc_tbl_no, Ta = 0
+            comp.dc_tbl_no << 4
+        } else {
+            // AC scan: Td = 0, Ta = ac_tbl_no
+            comp.ac_tbl_no
+        };
+        output.write_all(&[comp.component_id, table_selector])?;
     }
 
     // Spectral selection start (Ss), end (Se), successive approximation (Ah, Al)
@@ -2015,5 +2070,138 @@ mod tests {
         let encoder = Encoder::max_compression();
         assert!(encoder.optimize_scans);
         assert!(encoder.progressive);
+    }
+
+    /// Regression test: Progressive encoding with non-MCU-aligned dimensions.
+    ///
+    /// This tests the fix for a bug where progressive AC scans were encoding
+    /// MCU-padded blocks instead of actual component blocks. For non-interleaved
+    /// scans (AC scans), the block count should be ceil(width/8) × ceil(height/8),
+    /// not the MCU-padded count.
+    ///
+    /// The bug manifested as corrupted images (PSNR ~29 instead of ~43) for sizes
+    /// like 17x17 with 4:2:0 subsampling, where the edge block row had v_idx=0.
+    #[test]
+    fn test_progressive_non_mcu_aligned_regression() {
+        // Test sizes that triggered the bug: where (size-1)/8 % 2 == 0
+        // These have edge blocks with v_idx=0 in 4:2:0 mode
+        let failing_sizes = [17, 24, 33, 40, 49];
+
+        for &size in &failing_sizes {
+            let s = size as usize;
+            let mut rgb = vec![0u8; s * s * 3];
+            for y in 0..s {
+                for x in 0..s {
+                    let idx = (y * s + x) * 3;
+                    rgb[idx] = ((x * 15) as u8).min(255);
+                    rgb[idx + 1] = ((y * 15) as u8).min(255);
+                    rgb[idx + 2] = 128;
+                }
+            }
+
+            // Encode baseline (reference)
+            let baseline = Encoder::new()
+                .quality(95)
+                .subsampling(Subsampling::S420)
+                .progressive(false)
+                .optimize_huffman(true)
+                .trellis(TrellisConfig::disabled())
+                .encode_rgb(&rgb, size, size)
+                .unwrap();
+
+            // Encode progressive (this was buggy)
+            let progressive = Encoder::new()
+                .quality(95)
+                .subsampling(Subsampling::S420)
+                .progressive(true)
+                .optimize_huffman(true)
+                .trellis(TrellisConfig::disabled())
+                .encode_rgb(&rgb, size, size)
+                .unwrap();
+
+            // Decode both
+            let base_dec = jpeg_decoder::Decoder::new(std::io::Cursor::new(&baseline))
+                .decode()
+                .expect("baseline decode failed");
+            let prog_dec = jpeg_decoder::Decoder::new(std::io::Cursor::new(&progressive))
+                .decode()
+                .expect("progressive decode failed");
+
+            // Calculate PSNR for both
+            let base_psnr = calculate_psnr(&rgb, &base_dec);
+            let prog_psnr = calculate_psnr(&rgb, &prog_dec);
+
+            // Progressive PSNR should be within 3 dB of baseline (not 14 dB worse!)
+            let diff = (prog_psnr - base_psnr).abs();
+            assert!(
+                diff < 3.0,
+                "{}x{}: Progressive PSNR ({:.1}) differs from baseline ({:.1}) by {:.1} dB",
+                size, size, prog_psnr, base_psnr, diff
+            );
+        }
+    }
+
+    /// Also test 4:2:2 subsampling which had the same bug
+    #[test]
+    fn test_progressive_422_non_mcu_aligned_regression() {
+        let size = 17u32;
+        let s = size as usize;
+        let mut rgb = vec![0u8; s * s * 3];
+        for y in 0..s {
+            for x in 0..s {
+                let idx = (y * s + x) * 3;
+                rgb[idx] = ((x * 15) as u8).min(255);
+                rgb[idx + 1] = ((y * 15) as u8).min(255);
+                rgb[idx + 2] = 128;
+            }
+        }
+
+        let baseline = Encoder::new()
+            .quality(95)
+            .subsampling(Subsampling::S422)
+            .progressive(false)
+            .encode_rgb(&rgb, size, size)
+            .unwrap();
+
+        let progressive = Encoder::new()
+            .quality(95)
+            .subsampling(Subsampling::S422)
+            .progressive(true)
+            .encode_rgb(&rgb, size, size)
+            .unwrap();
+
+        let base_dec = jpeg_decoder::Decoder::new(std::io::Cursor::new(&baseline))
+            .decode()
+            .unwrap();
+        let prog_dec = jpeg_decoder::Decoder::new(std::io::Cursor::new(&progressive))
+            .decode()
+            .unwrap();
+
+        let base_psnr = calculate_psnr(&rgb, &base_dec);
+        let prog_psnr = calculate_psnr(&rgb, &prog_dec);
+        let diff = (prog_psnr - base_psnr).abs();
+
+        assert!(
+            diff < 3.0,
+            "4:2:2 17x17: Progressive PSNR ({:.1}) differs from baseline ({:.1}) by {:.1} dB",
+            prog_psnr, base_psnr, diff
+        );
+    }
+
+    fn calculate_psnr(orig: &[u8], decoded: &[u8]) -> f64 {
+        let mse: f64 = orig
+            .iter()
+            .zip(decoded.iter())
+            .map(|(&a, &b)| {
+                let diff = a as f64 - b as f64;
+                diff * diff
+            })
+            .sum::<f64>()
+            / orig.len() as f64;
+
+        if mse == 0.0 {
+            return f64::INFINITY;
+        }
+        10.0 * (255.0_f64 * 255.0 / mse).log10()
     }
 }

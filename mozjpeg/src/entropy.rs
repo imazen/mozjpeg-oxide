@@ -456,6 +456,9 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
             // Emit ZRL codes for runs of 16+ zeros
             while run >= 16 {
                 let (code, size) = ac_table.get_code(0xF0);
+                if size == 0 {
+                    eprintln!("ERROR: ZRL symbol 0xF0 has no Huffman code!");
+                }
                 self.writer.put_bits(code, size)?;
                 run -= 16;
             }
@@ -466,6 +469,10 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
             // Symbol = (run << 4) | nbits
             let symbol = ((run as u8) << 4) | nbits;
             let (code, size) = ac_table.get_code(symbol);
+            if size == 0 {
+                // This should never happen - means symbol wasn't in Huffman table
+                eprintln!("ERROR: AC symbol 0x{:02X} has no Huffman code!", symbol);
+            }
             self.writer.put_bits(code, size)?;
 
             // Emit value bits (sign bit first for negative)

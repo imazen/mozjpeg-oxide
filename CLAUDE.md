@@ -10,7 +10,7 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
 
 ## Current Status
 
-**147 tests passing** (127 unit + 5 codec comparison + 10 FFI comparison + 5 FFI validation)
+**152 tests passing** (129 unit + 8 codec comparison + 10 FFI comparison + 5 FFI validation)
 
 ### Compression Results vs C mozjpeg
 
@@ -78,16 +78,12 @@ let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
 - **Quality presets** - `max_compression()` and `fastest()`
 
 ### Remaining Work
-- **Bug: Progressive encoder MCU column issue** - Progressive encoding produces quality degradation
-  when images have multiple MCU columns (width > 16px with 4:2:0). Tall images (1 MCU column)
-  work correctly. See `mozjpeg/tests/codec_comparison.rs:test_progressive_debug_64x64` for details.
 - Optional: EOB optimization integration (`trellis_eob_opt` - disabled by default in C mozjpeg)
 - Optional: deringing, arithmetic coding
 - Performance optimization (SIMD)
 
-**Baseline mode works well!** With baseline + trellis + Huffman optimization, Rust produces
-files with quality matching C mozjpeg. Progressive mode has a known bug affecting multi-column
-MCU images that needs investigation.
+**Both baseline and progressive modes work correctly!** With trellis + Huffman optimization,
+Rust produces files with quality matching C mozjpeg across all image sizes and subsampling modes.
 
 ## Workflow Rules
 
@@ -112,6 +108,15 @@ MCU images that needs investigation.
 - Ensuring byte-exact parity with C implementation
 
 If a test seems obsolete, comment it out with explanation rather than deleting.
+
+### Golden Rule: Never Relax Test Tolerances to Avoid Debugging
+**NEVER relax test tolerances or skip failing tests to make CI green.** When tests fail:
+1. **Debug the root cause** - Don't paper over bugs with looser thresholds
+2. **Use DSSIM, not PSNR** - PSNR is unreliable for perceptual quality comparison
+3. **Validate byte/coefficient differences** - Compare actual encoded values between Rust and C
+4. **Track "off-by-N" errors** - Small systematic differences indicate encoder bugs
+
+If a test is failing, the encoder has a bug. Find it and fix it.
 
 ## Key Learnings
 

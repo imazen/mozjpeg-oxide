@@ -31,7 +31,7 @@ use crate::huffman::FrequencyCounter;
 use crate::error::{Error, Result};
 use crate::huffman::{DerivedTable, HuffTable};
 use crate::marker::MarkerWriter;
-use crate::progressive::{generate_baseline_scan, generate_simple_progressive_scans};
+use crate::progressive::{generate_baseline_scan, generate_simple_progressive_scans, generate_minimal_progressive_scans, generate_dc_only_scan};
 use crate::quant::{create_quant_tables, quantize_block};
 use crate::trellis::{trellis_quantize_block, dc_trellis_optimize_indexed};
 use crate::sample;
@@ -373,7 +373,10 @@ impl Encoder {
             }
 
             // Generate progressive scan script
-            let scans = generate_simple_progressive_scans(3);
+            // DEBUG: Use DC-only to isolate if bug is in DC or AC encoding
+            // let scans = generate_dc_only_scan(3);
+            // Use minimal (4 scans) to match C mozjpeg's jpeg_simple_progression()
+            let scans = generate_minimal_progressive_scans(3);
 
             // Count symbol frequencies for optimized Huffman tables
             let (opt_dc_luma, opt_dc_chroma, opt_ac_luma, opt_ac_chroma) = if self.optimize_huffman {
@@ -1041,6 +1044,18 @@ impl Encoder {
     }
 
     /// Encode an AC scan (Ss > 0).
+    ///
+    /// **IMPORTANT**: Progressive AC scans are always non-interleaved, meaning blocks
+    /// must be encoded in component raster order (row-major within the component's
+    /// block grid), NOT in MCU-interleaved order.
+    ///
+    /// For Y with 2x2 sampling in a 2-MCU-wide image:
+    /// - Storage order (MCU): [0,1,2,3], [4,5,6,7] where within MCU: [(0,0),(0,1),(1,0),(1,1)]
+    /// - Raster order: [(0,0),(0,1),(0,2),(0,3)], [(1,0),(1,1),(1,2),(1,3)]
+    ///
+    /// Reference: ITU-T T.81 Section F.2.3 - "The scan data for a non-interleaved
+    /// scan shall consist of a sequence of entropy-coded segments... The data units
+    /// are processed in the order defined by the scan component."
     #[allow(clippy::too_many_arguments)]
     fn encode_ac_scan<W: Write>(
         &self,
@@ -1054,33 +1069,58 @@ impl Encoder {
         is_refinement: bool,
         encoder: &mut ProgressiveEncoder<W>,
     ) -> Result<()> {
-        // For Y component, blocks are interleaved per MCU
-        // For chroma, one block per MCU
+        // For Y component with subsampling, blocks are stored in MCU-interleaved order
+        // but AC scans must encode them in component raster order.
+        // For chroma components (1 block per MCU), the orders are identical.
+
         let blocks_per_mcu = if comp_idx == 0 {
             (h_samp * v_samp) as usize
         } else {
             1
         };
 
-        let mut block_idx = 0;
+        if blocks_per_mcu == 1 {
+            // Chroma or 4:4:4 Y: storage order = raster order
+            for block in blocks.iter() {
+                if is_refinement {
+                    encoder.encode_ac_refine(block, scan.ss, scan.se, scan.al, ac_table)?;
+                } else {
+                    encoder.encode_ac_first(block, scan.ss, scan.se, scan.al, ac_table)?;
+                }
+            }
+        } else {
+            // Y component with subsampling (h_samp > 1 or v_samp > 1)
+            // Convert from MCU-interleaved storage to component raster order
+            let h = h_samp as usize;
+            let v = v_samp as usize;
+            let total_block_cols = mcu_cols * h;
+            let total_block_rows = mcu_rows * v;
 
-        for _mcu_row in 0..mcu_rows {
-            for _mcu_col in 0..mcu_cols {
-                for _ in 0..blocks_per_mcu {
+            for block_row in 0..total_block_rows {
+                for block_col in 0..total_block_cols {
+                    // Convert raster position to MCU-interleaved storage index
+                    let mcu_row = block_row / v;
+                    let mcu_col = block_col / h;
+                    let v_idx = block_row % v;
+                    let h_idx = block_col % h;
+                    let storage_idx = mcu_row * (mcu_cols * blocks_per_mcu)
+                                    + mcu_col * blocks_per_mcu
+                                    + v_idx * h
+                                    + h_idx;
+
                     if is_refinement {
                         encoder.encode_ac_refine(
-                            &blocks[block_idx],
+                            &blocks[storage_idx],
                             scan.ss, scan.se, scan.al,
                             ac_table,
                         )?;
                     } else {
                         encoder.encode_ac_first(
-                            &blocks[block_idx],
+                            &blocks[storage_idx],
                             scan.ss, scan.se, scan.al,
                             ac_table,
                         )?;
                     }
-                    block_idx += 1;
                 }
             }
         }
@@ -1124,6 +1164,9 @@ impl Encoder {
     }
 
     /// Count AC symbols for a progressive AC scan.
+    ///
+    /// Must iterate blocks in the same order as `encode_ac_scan` (component raster order)
+    /// to ensure EOBRUN counts match and Huffman tables are correct.
     #[allow(clippy::too_many_arguments)]
     fn count_ac_scan_symbols(
         &self,
@@ -1141,14 +1184,33 @@ impl Encoder {
             1
         };
 
-        let mut block_idx = 0;
         let mut counter = ProgressiveSymbolCounter::new();
 
-        for _mcu_row in 0..mcu_rows {
-            for _mcu_col in 0..mcu_cols {
-                for _ in 0..blocks_per_mcu {
-                    counter.count_ac_first(&blocks[block_idx], scan.ss, scan.se, scan.al, ac_freq);
-                    block_idx += 1;
+        if blocks_per_mcu == 1 {
+            // Chroma or 4:4:4 Y: storage order = raster order
+            for block in blocks.iter() {
+                counter.count_ac_first(block, scan.ss, scan.se, scan.al, ac_freq);
+            }
+        } else {
+            // Y component with subsampling - iterate in raster order (matching encode_ac_scan)
+            let h = h_samp as usize;
+            let v = v_samp as usize;
+            let total_block_cols = mcu_cols * h;
+            let total_block_rows = mcu_rows * v;
+
+            for block_row in 0..total_block_rows {
+                for block_col in 0..total_block_cols {
+                    // Convert raster position to MCU-interleaved storage index
+                    let mcu_row = block_row / v;
+                    let mcu_col = block_col / h;
+                    let v_idx = block_row % v;
+                    let h_idx = block_col % h;
+                    let storage_idx = mcu_row * (mcu_cols * blocks_per_mcu)
+                                    + mcu_col * blocks_per_mcu
+                                    + v_idx * h
+                                    + h_idx;
+
+                    counter.count_ac_first(&blocks[storage_idx], scan.ss, scan.se, scan.al, ac_freq);
                 }
             }
         }

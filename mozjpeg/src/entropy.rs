@@ -427,6 +427,7 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
         al: u8,
         ac_table: &DerivedTable,
     ) -> std::io::Result<()> {
+
         // Find last non-zero coefficient in this band
         let mut k = se;
         while k >= ss {
@@ -613,12 +614,12 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
             return Ok(());
         }
 
-        // Calculate EOBn symbol (n = log2(EOBRUN))
-        let nbits = if self.eobrun == 1 {
-            0
-        } else {
-            16 - (self.eobrun - 1).leading_zeros() as u8
-        };
+        // Calculate EOBn symbol (n = floor(log2(EOBRUN)))
+        // EOB0: EOBRUN=1 (nbits=0)
+        // EOB1: EOBRUN=2-3 (nbits=1, 1 extra bit)
+        // EOB2: EOBRUN=4-7 (nbits=2, 2 extra bits)
+        // etc.
+        let nbits = 15 - self.eobrun.leading_zeros() as u8;
 
         // Symbol for EOBn is nbits << 4 (run=0)
         let symbol = nbits << 4;
@@ -626,9 +627,10 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
         self.writer.put_bits(code, size)?;
 
         // Output additional bits for EOBRUN
+        // Extra bits encode: EOBRUN - 2^nbits = EOBRUN & (2^nbits - 1)
         if nbits > 0 {
             let mask = (1u16 << nbits) - 1;
-            let extra = (self.eobrun - 1) & mask;
+            let extra = self.eobrun & mask;
             self.writer.put_bits(extra as u32, nbits)?;
         }
 
@@ -766,12 +768,12 @@ impl ProgressiveSymbolCounter {
             return;
         }
 
-        // Calculate EOBn symbol (n = log2(EOBRUN))
-        let nbits = if self.eobrun == 1 {
-            0
-        } else {
-            16 - (self.eobrun - 1).leading_zeros() as u8
-        };
+        // Calculate EOBn symbol (n = floor(log2(EOBRUN)))
+        // EOB0: EOBRUN=1 (nbits=0)
+        // EOB1: EOBRUN=2-3 (nbits=1)
+        // EOB2: EOBRUN=4-7 (nbits=2)
+        // etc.
+        let nbits = 15 - self.eobrun.leading_zeros() as u8;
 
         // Symbol for EOBn is nbits << 4 (run=0)
         let symbol = nbits << 4;
@@ -911,6 +913,114 @@ mod tests {
 
         let bytes = writer.into_bytes();
         assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn test_progressive_ac_encoding_matches_baseline() {
+        let ac_table = create_ac_luma_table();
+
+        // Test block with known AC coefficients
+        let mut block = [0i16; DCTSIZE2];
+        block[1] = 10;   // AC at natural position 1 (zigzag 1)
+        block[8] = -5;   // AC at natural position 8 (zigzag 2)
+        block[16] = 3;   // AC at natural position 16 (zigzag 3)
+        // block[0] is DC, not encoded in AC scan
+
+        // Baseline-style AC encoding
+        let mut base_writer = VecBitWriter::new_vec();
+        {
+            let mut run = 0u8;
+            for &zigzag_idx in JPEG_NATURAL_ORDER[1..].iter() {
+                let coef = block[zigzag_idx];
+                if coef == 0 {
+                    run += 1;
+                } else {
+                    while run >= 16 {
+                        let (code, size) = ac_table.get_code(0xF0);
+                        base_writer.put_bits(code, size).unwrap();
+                        run -= 16;
+                    }
+                    let nbits = jpeg_nbits(coef);
+                    let symbol = (run << 4) | nbits;
+                    let (code, size) = ac_table.get_code(symbol);
+                    base_writer.put_bits(code, size).unwrap();
+                    if coef < 0 {
+                        let value = (coef as u16).wrapping_sub(1) & ((1u16 << nbits) - 1);
+                        base_writer.put_bits(value as u32, nbits).unwrap();
+                    } else {
+                        base_writer.put_bits(coef as u32, nbits).unwrap();
+                    }
+                    run = 0;
+                }
+            }
+            if run > 0 {
+                let (code, size) = ac_table.get_code(0x00); // EOB
+                base_writer.put_bits(code, size).unwrap();
+            }
+        }
+        base_writer.flush().unwrap();
+        let base_bytes = base_writer.into_bytes();
+
+        // Progressive-style AC encoding (via ProgressiveEncoder)
+        let mut prog_writer = VecBitWriter::new_vec();
+        {
+            let mut encoder = ProgressiveEncoder::new_standard_tables(&mut prog_writer);
+            encoder.encode_ac_first(&block, 1, 63, 0, &ac_table).unwrap();
+            encoder.finish_scan(Some(&ac_table)).unwrap();
+        }
+        let prog_bytes = prog_writer.into_bytes();
+
+        // They should produce identical output
+        println!("Baseline bytes: {:02X?}", base_bytes);
+        println!("Progressive bytes: {:02X?}", prog_bytes);
+        assert_eq!(base_bytes, prog_bytes, "AC encoding should be identical");
+    }
+
+    #[test]
+    fn test_progressive_multiple_blocks_ac_encoding() {
+        // Test that progressive AC encoder handles multiple blocks correctly.
+        //
+        // Progressive encoding uses a continuous bitstream (no flush between blocks),
+        // while baseline flushes after each block. This is expected to produce DIFFERENT
+        // byte output, but both should decode to the same coefficients.
+        //
+        // This test validates that multi-block progressive encoding produces valid output
+        // (no panics, reasonable size) rather than byte-exact matching.
+
+        let ac_table = create_ac_luma_table();
+
+        // Create 8 blocks with different AC patterns (simulating 2 MCUs of 4 blocks each)
+        let mut blocks = [[0i16; DCTSIZE2]; 8];
+        blocks[0][1] = 10;   // Block 0: some AC
+        blocks[1][1] = 20;   // Block 1: different AC
+        blocks[2][1] = 5;    // Block 2
+        blocks[3][1] = -5;   // Block 3
+        blocks[4][1] = 15;   // Block 4
+        blocks[5][1] = -10;  // Block 5
+        blocks[6][1] = 8;    // Block 6
+        blocks[7][1] = -3;   // Block 7
+
+        // Encode all 8 blocks with progressive AC encoder
+        let mut prog_writer = VecBitWriter::new_vec();
+        {
+            let mut encoder = ProgressiveEncoder::new_standard_tables(&mut prog_writer);
+            for i in 0..8 {
+                encoder.encode_ac_first(&blocks[i], 1, 63, 0, &ac_table).unwrap();
+            }
+            encoder.finish_scan(Some(&ac_table)).unwrap();
+        }
+        let prog_bytes = prog_writer.into_bytes();
+
+        // Progressive encoding should produce valid output
+        assert!(!prog_bytes.is_empty(), "Progressive encoding should produce output");
+
+        // The output should be reasonably sized (not empty, not excessively large)
+        // Each block with 1 non-zero AC coefficient + EOB should be ~2-3 bytes per block
+        // 8 blocks should produce roughly 16-24 bytes (tighter packing than baseline)
+        assert!(prog_bytes.len() >= 8, "Output should have at least 1 byte per block");
+        assert!(prog_bytes.len() <= 30, "Output should not be excessively large");
+
+        println!("Progressive multi-block encoding: {} bytes", prog_bytes.len());
     }
 
     #[test]

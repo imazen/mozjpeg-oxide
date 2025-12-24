@@ -44,6 +44,34 @@ pub fn generate_simple_progressive_scans(num_components: u8) -> Vec<ScanInfo> {
     scans
 }
 
+/// Generate a minimal progressive scan script for debugging.
+///
+/// This is the simplest possible progressive encoding:
+/// 1. DC scan for all components
+/// 2. Full AC scan (1-63) for each component
+///
+/// # Arguments
+/// * `num_components` - Number of color components (1 for grayscale, 3 for YCbCr)
+pub fn generate_minimal_progressive_scans(num_components: u8) -> Vec<ScanInfo> {
+    let mut scans = Vec::new();
+
+    // DC scan for all components (interleaved)
+    scans.push(ScanInfo::dc_scan(num_components));
+
+    // Full AC scan for each component
+    for comp in 0..num_components {
+        scans.push(ScanInfo::ac_scan(comp, 1, 63, 0, 0));
+    }
+
+    scans
+}
+
+/// Generate DC-only progressive scan for debugging.
+/// This omits all AC scans to test if DC encoding is correct.
+pub fn generate_dc_only_scan(num_components: u8) -> Vec<ScanInfo> {
+    vec![ScanInfo::dc_scan(num_components)]
+}
+
 /// Generate a standard progressive scan script following libjpeg convention.
 ///
 /// This generates:

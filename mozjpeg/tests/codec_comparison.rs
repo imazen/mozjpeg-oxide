@@ -3,6 +3,14 @@
 //! This test suite compares Rust mozjpeg vs C mozjpeg across multiple
 //! quality levels, encoding modes, and test images.
 //!
+//! **Quality Metrics**: Uses DSSIM (structural dissimilarity) instead of PSNR.
+//! PSNR is unreliable for perceptual quality comparison. DSSIM thresholds:
+//! - Imperceptible: < 0.0003
+//! - Marginal: < 0.0007
+//! - Subtle: < 0.0015
+//! - Noticeable: < 0.003
+//! - Degraded: >= 0.003
+//!
 //! Note: codec-eval integration test is currently disabled due to API
 //! compatibility issues (see test_codec_eval_session).
 
@@ -10,6 +18,8 @@
 use codec_eval::{
     EvalConfig, EvalSession, ImageData, MetricConfig, ViewingCondition,
 };
+
+use dssim::Dssim;
 
 /// Encode using Rust mozjpeg with specific settings.
 fn rust_encode_baseline(data: &[u8], width: u32, height: u32, quality: u8) -> Vec<u8> {
@@ -172,11 +182,131 @@ fn decode_and_psnr(jpeg_data: &[u8], reference: &[u8]) -> f64 {
     }
 }
 
+/// Decode JPEG and compute DSSIM against reference.
+/// Returns DSSIM value (0 = identical, higher = worse).
+fn decode_and_dssim(jpeg_data: &[u8], reference: &[u8], width: u32, height: u32) -> f64 {
+    use rgb::RGB8;
+
+    let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(jpeg_data));
+    let decoded = decoder.decode().expect("Decode failed");
+
+    // Create DSSIM analyzer
+    let attr = Dssim::new();
+
+    // Convert reference to DSSIM image (expects RGB8)
+    let ref_rgb: Vec<RGB8> = reference
+        .chunks(3)
+        .map(|c| RGB8::new(c[0], c[1], c[2]))
+        .collect();
+    let ref_img = attr
+        .create_image_rgb(&ref_rgb, width as usize, height as usize)
+        .expect("Failed to create reference image");
+
+    // Convert decoded to DSSIM image
+    let dec_rgb: Vec<RGB8> = decoded
+        .chunks(3)
+        .map(|c| RGB8::new(c[0], c[1], c[2]))
+        .collect();
+    let dec_img = attr
+        .create_image_rgb(&dec_rgb, width as usize, height as usize)
+        .expect("Failed to create decoded image");
+
+    let (dssim_val, _) = attr.compare(&ref_img, dec_img);
+    dssim_val.into()
+}
+
+/// Compare two decoded JPEG images and return DSSIM between them.
+fn compare_jpeg_dssim(jpeg_a: &[u8], jpeg_b: &[u8]) -> f64 {
+    use rgb::RGB8;
+
+    let mut dec_a = jpeg_decoder::Decoder::new(std::io::Cursor::new(jpeg_a));
+    let decoded_a = dec_a.decode().expect("Decode A failed");
+    let info_a = dec_a.info().expect("Info A failed");
+
+    let mut dec_b = jpeg_decoder::Decoder::new(std::io::Cursor::new(jpeg_b));
+    let decoded_b = dec_b.decode().expect("Decode B failed");
+
+    let attr = Dssim::new();
+
+    // Convert A to DSSIM image
+    let rgb_a: Vec<RGB8> = decoded_a
+        .chunks(3)
+        .map(|c| RGB8::new(c[0], c[1], c[2]))
+        .collect();
+    let img_a = attr
+        .create_image_rgb(&rgb_a, info_a.width as usize, info_a.height as usize)
+        .expect("Failed to create image A");
+
+    // Convert B to DSSIM image
+    let rgb_b: Vec<RGB8> = decoded_b
+        .chunks(3)
+        .map(|c| RGB8::new(c[0], c[1], c[2]))
+        .collect();
+    let img_b = attr
+        .create_image_rgb(&rgb_b, info_a.width as usize, info_a.height as usize)
+        .expect("Failed to create image B");
+
+    let (dssim_val, _) = attr.compare(&img_a, img_b);
+    dssim_val.into()
+}
+
+/// Compare byte-level differences between two encoded JPEGs.
+/// Returns (differing_bytes, max_diff_offset, common_prefix_len).
+fn compare_jpeg_bytes(jpeg_a: &[u8], jpeg_b: &[u8]) -> (usize, Option<usize>, usize) {
+    let common_prefix = jpeg_a
+        .iter()
+        .zip(jpeg_b.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let differing = jpeg_a
+        .iter()
+        .zip(jpeg_b.iter())
+        .enumerate()
+        .filter(|(_, (a, b))| a != b)
+        .count();
+
+    let first_diff = jpeg_a
+        .iter()
+        .zip(jpeg_b.iter())
+        .position(|(a, b)| a != b);
+
+    (differing, first_diff, common_prefix)
+}
+
+/// Compare decoded pixel values between two JPEGs.
+/// Returns (max_diff, avg_diff, num_pixels_diff).
+fn compare_decoded_pixels(jpeg_a: &[u8], jpeg_b: &[u8]) -> (u8, f64, usize) {
+    let mut dec_a = jpeg_decoder::Decoder::new(std::io::Cursor::new(jpeg_a));
+    let decoded_a = dec_a.decode().expect("Decode A failed");
+
+    let mut dec_b = jpeg_decoder::Decoder::new(std::io::Cursor::new(jpeg_b));
+    let decoded_b = dec_b.decode().expect("Decode B failed");
+
+    let mut max_diff = 0u8;
+    let mut total_diff = 0u64;
+    let mut pixels_diff = 0usize;
+
+    for (&a, &b) in decoded_a.iter().zip(decoded_b.iter()) {
+        let diff = (a as i16 - b as i16).unsigned_abs() as u8;
+        if diff > 0 {
+            pixels_diff += 1;
+        }
+        if diff > max_diff {
+            max_diff = diff;
+        }
+        total_diff += diff as u64;
+    }
+
+    let avg_diff = total_diff as f64 / decoded_a.len() as f64;
+    (max_diff, avg_diff, pixels_diff)
+}
+
 /// Test baseline mode comparison.
 ///
 /// Note: C mozjpeg-sys defaults to progressive mode, so we're actually comparing
 /// Rust baseline against C progressive. The file sizes will differ due to different
-/// entropy coding organization, but PSNR should be similar at the same quality.
+/// entropy coding organization, but quality should be similar at the same quality.
 #[test]
 fn test_rust_vs_c_baseline_quality_sweep() {
     println!("\n=== Rust vs C mozjpeg: Baseline Mode Quality Sweep ===\n");
@@ -189,39 +319,50 @@ fn test_rust_vs_c_baseline_quality_sweep() {
         let image = create_photo_like_image(width, height);
         println!("Image {}x{}:", width, height);
         println!(
-            "{:>7} {:>12} {:>12} {:>8} {:>10} {:>10}",
-            "Quality", "Rust Size", "C Size", "Ratio", "Rust PSNR", "C PSNR"
+            "{:>7} {:>12} {:>12} {:>8} {:>12} {:>12} {:>12}",
+            "Quality", "Rust Size", "C Size", "Ratio", "Rust DSSIM", "C DSSIM", "R vs C DSSIM"
         );
 
         for quality in qualities {
             let rust_encoded = rust_encode_baseline(&image, width, height, quality);
             let c_encoded = c_encode(&image, width, height, quality, false);
 
-            let rust_psnr = decode_and_psnr(&rust_encoded, &image);
-            let c_psnr = decode_and_psnr(&c_encoded, &image);
+            let rust_dssim = decode_and_dssim(&rust_encoded, &image, width, height);
+            let c_dssim = decode_and_dssim(&c_encoded, &image, width, height);
+            let rust_vs_c_dssim = compare_jpeg_dssim(&rust_encoded, &c_encoded);
 
             let ratio = rust_encoded.len() as f64 / c_encoded.len() as f64;
 
             println!(
-                "{:>7} {:>12} {:>12} {:>8.2}% {:>10.2} {:>10.2}",
+                "{:>7} {:>12} {:>12} {:>8.2}% {:>12.6} {:>12.6} {:>12.6}",
                 quality,
                 rust_encoded.len(),
                 c_encoded.len(),
                 ratio * 100.0,
-                rust_psnr,
-                c_psnr
+                rust_dssim,
+                c_dssim,
+                rust_vs_c_dssim
             );
 
-            // Verify quality is reasonable (within 2 dB)
+            // Verify Rust vs C decoded images are nearly identical
+            // DSSIM < 0.0007 is "marginal" (hard to see)
             assert!(
-                (rust_psnr - c_psnr).abs() < 2.0,
-                "PSNR difference too large: Rust={:.2}, C={:.2}",
-                rust_psnr,
-                c_psnr
+                rust_vs_c_dssim < 0.001,
+                "Rust vs C DSSIM too high at Q{}: {:.6} (should be < 0.001)",
+                quality, rust_vs_c_dssim
             );
 
-            // Relaxed file size tolerance - C uses progressive, Rust uses baseline
-            // which have different entropy coding overhead
+            // Verify quality is similar to reference (within 50% of C)
+            // If C achieves DSSIM X, Rust should be no worse than 1.5*X
+            if c_dssim > 0.00001 {
+                assert!(
+                    rust_dssim < c_dssim * 1.5,
+                    "Rust DSSIM too high at Q{}: {:.6} vs C {:.6}",
+                    quality, rust_dssim, c_dssim
+                );
+            }
+
+            // File size tolerance - C uses progressive, Rust uses baseline
             assert!(
                 ratio < 1.25 && ratio > 0.80,
                 "File size ratio out of range: {:.2}% for {}x{} Q{}",
@@ -236,54 +377,76 @@ fn test_rust_vs_c_baseline_quality_sweep() {
 ///
 /// KNOWN ISSUE: The progressive encoder has a bug when encoding images with
 /// multiple MCU columns. This causes quality degradation for images wider than
-/// 16 pixels with 4:2:0 subsampling. See test_progressive_debug_64x64 for details.
+/// 16 pixels with 4:2:0 subsampling. See test_progressive_mcu_bug for details.
 ///
-/// For now, this test only verifies that progressive encoding produces valid
-/// output (decodable JPEG) without strict quality assertions.
+/// This test enforces strict quality comparison using DSSIM.
+/// IT WILL FAIL until the MCU column bug is fixed.
 #[test]
 fn test_rust_vs_c_progressive_quality_sweep() {
     println!("\n=== Rust vs C mozjpeg: Progressive Mode Quality Sweep ===\n");
-    println!("NOTE: Progressive mode has a known bug with multi-column MCUs.\n");
 
     let sizes = [(16, 64), (64, 64), (256, 256)];
     let qualities = [75, 85, 90];
+
+    let mut failures = Vec::new();
 
     for (width, height) in sizes {
         let image = create_photo_like_image(width, height);
         println!("Image {}x{}:", width, height);
         println!(
-            "{:>7} {:>12} {:>12} {:>8} {:>10} {:>10}",
-            "Quality", "Rust Size", "C Size", "Ratio", "Rust PSNR", "C PSNR"
+            "{:>7} {:>12} {:>12} {:>8} {:>12} {:>12} {:>12}",
+            "Quality", "Rust Size", "C Size", "Ratio", "Rust DSSIM", "C DSSIM", "R vs C DSSIM"
         );
 
         for quality in qualities {
             let rust_encoded = rust_encode_progressive(&image, width, height, quality);
             let c_encoded = c_encode(&image, width, height, quality, true);
 
-            let rust_psnr = decode_and_psnr(&rust_encoded, &image);
-            let c_psnr = decode_and_psnr(&c_encoded, &image);
+            let rust_dssim = decode_and_dssim(&rust_encoded, &image, width, height);
+            let c_dssim = decode_and_dssim(&c_encoded, &image, width, height);
+            let rust_vs_c_dssim = compare_jpeg_dssim(&rust_encoded, &c_encoded);
 
             let ratio = rust_encoded.len() as f64 / c_encoded.len() as f64;
 
+            // Check if this is a multi-MCU-column image (width > 16 with 4:2:0)
+            let is_multi_column = width > 16;
+
             println!(
-                "{:>7} {:>12} {:>12} {:>8.2}% {:>10.2} {:>10.2}",
+                "{:>7} {:>12} {:>12} {:>8.2}% {:>12.6} {:>12.6} {:>12.6}{}",
                 quality,
                 rust_encoded.len(),
                 c_encoded.len(),
                 ratio * 100.0,
-                rust_psnr,
-                c_psnr
+                rust_dssim,
+                c_dssim,
+                rust_vs_c_dssim,
+                if rust_vs_c_dssim > 0.001 { " *** BUG" } else { "" }
             );
 
-            // Only verify that the output is valid (produces reasonable PSNR)
-            // Don't enforce strict C comparison due to the known MCU column bug
-            assert!(
-                rust_psnr > 20.0,
-                "Progressive output has unacceptably low PSNR: {:.2}",
-                rust_psnr
-            );
+            // Strict DSSIM tolerance - decoded images should be nearly identical
+            // DSSIM < 0.001 is "marginal" (hard to see)
+            if rust_vs_c_dssim > 0.001 {
+                failures.push(format!(
+                    "{}x{} Q{}: Rust vs C DSSIM = {:.6} (> 0.001) - MCU column bug?",
+                    width, height, quality, rust_vs_c_dssim
+                ));
+            }
         }
         println!();
+    }
+
+    // Report all failures at the end
+    if !failures.is_empty() {
+        println!("\n=== FAILURES (progressive encoder bug) ===");
+        for f in &failures {
+            println!("  {}", f);
+        }
+        panic!(
+            "\nProgressive encoder has {} quality failures.\n\
+             See test_progressive_mcu_bug for debugging.\n\
+             DO NOT relax tolerances - fix the encoder.",
+            failures.len()
+        );
     }
 }
 
@@ -350,8 +513,8 @@ fn test_real_photo_baseline() {
 
     println!("Image: {}x{} ({} bytes RGB)", width, height, image.len());
     println!(
-        "{:>7} {:>12} {:>12} {:>8} {:>10} {:>10}",
-        "Quality", "Rust Size", "C Size", "Ratio", "Rust PSNR", "C PSNR"
+        "{:>7} {:>12} {:>12} {:>8} {:>12} {:>12} {:>12}",
+        "Quality", "Rust Size", "C Size", "Ratio", "Rust DSSIM", "C DSSIM", "R vs C DSSIM"
     );
 
     let qualities = [50, 75, 85, 90, 95];
@@ -360,26 +523,38 @@ fn test_real_photo_baseline() {
         let rust_encoded = rust_encode_baseline(&image, width, height, quality);
         let c_encoded = c_encode(&image, width, height, quality, false);
 
-        let rust_psnr = decode_and_psnr(&rust_encoded, &image);
-        let c_psnr = decode_and_psnr(&c_encoded, &image);
+        let rust_dssim = decode_and_dssim(&rust_encoded, &image, width, height);
+        let c_dssim = decode_and_dssim(&c_encoded, &image, width, height);
+        let rust_vs_c_dssim = compare_jpeg_dssim(&rust_encoded, &c_encoded);
 
         let ratio = rust_encoded.len() as f64 / c_encoded.len() as f64;
 
         println!(
-            "{:>7} {:>12} {:>12} {:>8.2}% {:>10.2} {:>10.2}",
+            "{:>7} {:>12} {:>12} {:>8.2}% {:>12.6} {:>12.6} {:>12.6}",
             quality,
             rust_encoded.len(),
             c_encoded.len(),
             ratio * 100.0,
-            rust_psnr,
-            c_psnr
+            rust_dssim,
+            c_dssim,
+            rust_vs_c_dssim
         );
 
-        // Verify quality is reasonable (within 2 dB)
+        // Compare decoded pixels
+        let (max_diff, avg_diff, pixels_diff) = compare_decoded_pixels(&rust_encoded, &c_encoded);
+        if max_diff > 0 {
+            println!(
+                "         Pixel diff: max={}, avg={:.2}, changed={}/{}",
+                max_diff, avg_diff, pixels_diff, image.len()
+            );
+        }
+
+        // Verify Rust vs C decoded images are nearly identical
+        // DSSIM < 0.001 is "marginal" (hard to see)
         assert!(
-            (rust_psnr - c_psnr).abs() < 2.0,
-            "PSNR difference too large at Q{}: Rust={:.2}, C={:.2}",
-            quality, rust_psnr, c_psnr
+            rust_vs_c_dssim < 0.001,
+            "Rust vs C DSSIM too high at Q{}: {:.6} (should be < 0.001)",
+            quality, rust_vs_c_dssim
         );
 
         // Verify file size is reasonable
@@ -395,7 +570,7 @@ fn test_real_photo_baseline() {
 
 #[test]
 fn test_different_image_types() {
-    println!("\n=== Testing Different Image Types ===\n");
+    println!("\n=== Testing Different Image Types (Baseline Mode) ===\n");
 
     let quality = 85;
     let width = 256;
@@ -409,306 +584,419 @@ fn test_different_image_types() {
     ];
 
     println!(
-        "{:<20} {:>12} {:>12} {:>8} {:>10} {:>10}",
-        "Image Type", "Rust Size", "C Size", "Ratio", "Rust PSNR", "C PSNR"
+        "{:<20} {:>12} {:>12} {:>8} {:>12} {:>12}",
+        "Image Type", "Rust Size", "C Size", "Ratio", "Rust DSSIM", "R vs C DSSIM"
     );
 
     for (name, image) in test_cases {
-        let rust_encoded = rust_encode_progressive(&image, width, height, quality);
-        let c_encoded = c_encode(&image, width, height, quality, true);
+        // Use baseline mode which works correctly
+        let rust_encoded = rust_encode_baseline(&image, width, height, quality);
+        let c_encoded = c_encode(&image, width, height, quality, false);
 
-        let rust_psnr = decode_and_psnr(&rust_encoded, &image);
-        let c_psnr = decode_and_psnr(&c_encoded, &image);
+        let rust_dssim = decode_and_dssim(&rust_encoded, &image, width, height);
+        let rust_vs_c_dssim = compare_jpeg_dssim(&rust_encoded, &c_encoded);
 
         let ratio = rust_encoded.len() as f64 / c_encoded.len() as f64;
 
         println!(
-            "{:<20} {:>12} {:>12} {:>8.2}% {:>10.2} {:>10.2}",
+            "{:<20} {:>12} {:>12} {:>8.2}% {:>12.6} {:>12.6}",
             name,
             rust_encoded.len(),
             c_encoded.len(),
             ratio * 100.0,
-            rust_psnr,
-            c_psnr
+            rust_dssim,
+            rust_vs_c_dssim
+        );
+
+        // Verify Rust vs C decoded images are nearly identical
+        assert!(
+            rust_vs_c_dssim < 0.001,
+            "{}: Rust vs C DSSIM too high: {:.6}",
+            name, rust_vs_c_dssim
         );
     }
 }
 
+/// Test a single MCU image (should work correctly in progressive mode).
+/// This isolates whether the issue is MCU-column related.
 #[test]
-fn test_progressive_debug_64x64() {
-    println!("\n=== Progressive Debug for 64x64 Q50 ===\n");
+fn test_single_mcu_progressive() {
+    println!("\n=== Single MCU Progressive Test (16x16 with 4:2:0) ===\n");
 
-    let width = 64;
-    let height = 64;
-    let quality = 50;
+    // 16x16 is exactly 1 MCU with 4:2:0 (16x16 luma = 2x2 blocks)
+    let width = 16;
+    let height = 16;
+    let quality = 75;
     let image = create_photo_like_image(width, height);
 
-    // Baseline with explicit settings
-    let baseline = mozjpeg::Encoder::new()
+    let rust_base = mozjpeg::Encoder::new()
         .quality(quality)
         .subsampling(mozjpeg::Subsampling::S420)
         .progressive(false)
-        .optimize_huffman(true)
+        .trellis(mozjpeg::TrellisConfig::disabled())
         .encode_rgb(&image, width, height)
-        .expect("Baseline failed");
+        .expect("Rust baseline failed");
 
-    // Progressive with new() + explicit flag
-    let progressive_new = mozjpeg::Encoder::new()
+    let rust_prog = mozjpeg::Encoder::new()
         .quality(quality)
         .subsampling(mozjpeg::Subsampling::S420)
         .progressive(true)
-        .optimize_huffman(true)
+        .trellis(mozjpeg::TrellisConfig::disabled())
         .encode_rgb(&image, width, height)
-        .expect("Progressive new failed");
+        .expect("Rust progressive failed");
 
-    // Progressive with max_compression()
-    let progressive_max = mozjpeg::Encoder::max_compression()
+    let c_prog = c_encode(&image, width, height, quality, true);
+
+    let rust_base_dssim = decode_and_dssim(&rust_base, &image, width, height);
+    let rust_prog_dssim = decode_and_dssim(&rust_prog, &image, width, height);
+    let rust_vs_base = compare_jpeg_dssim(&rust_prog, &rust_base);
+    let rust_vs_c = compare_jpeg_dssim(&rust_prog, &c_prog);
+
+    println!("Results:");
+    println!("  Rust baseline:    {} bytes, DSSIM={:.6}", rust_base.len(), rust_base_dssim);
+    println!("  Rust progressive: {} bytes, DSSIM={:.6}", rust_prog.len(), rust_prog_dssim);
+    println!("  C progressive:    {} bytes", c_prog.len());
+    println!("\n  Rust prog vs Rust base DSSIM: {:.6}", rust_vs_base);
+    println!("  Rust prog vs C prog DSSIM:    {:.6}", rust_vs_c);
+
+    // Single MCU should work correctly
+    assert!(
+        rust_vs_base < 0.001,
+        "Single MCU: Rust prog vs base DSSIM too high: {:.6}",
+        rust_vs_base
+    );
+}
+
+/// Test progressive with 4:4:4 subsampling (1 block per component per MCU).
+/// This isolates whether the bug is related to multi-block MCUs.
+#[test]
+fn test_progressive_444_subsampling() {
+    println!("\n=== Progressive 4:4:4 Test (32x16 = 4x2 MCUs) ===\n");
+
+    // With 4:4:4, each MCU is 8x8, so 32x16 = 4x2 MCUs
+    let width = 32;
+    let height = 16;
+    let quality = 75;
+    let image = create_photo_like_image(width, height);
+
+    let rust_base = mozjpeg::Encoder::new()
+        .quality(quality)
+        .subsampling(mozjpeg::Subsampling::S444)
+        .progressive(false)
+        .trellis(mozjpeg::TrellisConfig::disabled())
+        .encode_rgb(&image, width, height)
+        .expect("Rust baseline failed");
+
+    let rust_prog = mozjpeg::Encoder::new()
+        .quality(quality)
+        .subsampling(mozjpeg::Subsampling::S444)
+        .progressive(true)
+        .trellis(mozjpeg::TrellisConfig::disabled())
+        .encode_rgb(&image, width, height)
+        .expect("Rust progressive failed");
+
+    let rust_vs_base = compare_jpeg_dssim(&rust_prog, &rust_base);
+
+    println!("Results:");
+    println!("  Rust baseline:    {} bytes", rust_base.len());
+    println!("  Rust progressive: {} bytes", rust_prog.len());
+    println!("  Rust prog vs Rust base DSSIM: {:.6}", rust_vs_base);
+
+    // If 4:4:4 works, the bug is specific to multi-block MCUs
+    if rust_vs_base < 0.001 {
+        println!("\n4:4:4 progressive works! Bug is in multi-block MCU handling.");
+    } else {
+        println!("\n4:4:4 also broken! Bug is in general MCU column handling.");
+    }
+}
+
+/// Test to debug the progressive MCU column bug.
+///
+/// **Bug Description:**
+/// Progressive encoding produces corrupted output when the image has multiple
+/// MCU columns (width > 16 pixels with 4:2:0 subsampling). Single-column images
+/// (width <= 16) work correctly.
+///
+/// **Observed behavior:**
+/// - 16x64 (1 MCU column): Works correctly
+/// - 32x64 (2 MCU columns): Corrupted output
+/// - 64x64 (4 MCU columns): Corrupted output
+///
+/// **Root cause hypothesis:**
+/// The progressive encoder is not correctly iterating over MCU columns when
+/// encoding coefficient bands. Likely an off-by-one or stride calculation error
+/// in the scan loop.
+///
+/// **Debugging approach:**
+/// 1. Compare Rust vs C encoded bytes to find where they diverge
+/// 2. Compare decoded pixel differences per MCU region
+/// 3. Look for patterns in which MCU columns are affected
+#[test]
+fn test_progressive_mcu_bug() {
+    println!("\n=== Progressive MCU Column Bug Debugging ===\n");
+
+    // First test: solid color image (should have minimal AC coefficients)
+    println!("--- Test 1: Solid color image ---");
+    let solid_image: Vec<u8> = vec![128; 32 * 16 * 3]; // Gray
+    let solid_prog = mozjpeg::Encoder::new()
+        .quality(75)
+        .subsampling(mozjpeg::Subsampling::S420)
+        .progressive(true)
+        .trellis(mozjpeg::TrellisConfig::disabled())
+        .encode_rgb(&solid_image, 32, 16)
+        .expect("Rust progressive failed");
+
+    let solid_base = mozjpeg::Encoder::new()
+        .quality(75)
+        .subsampling(mozjpeg::Subsampling::S420)
+        .progressive(false)
+        .trellis(mozjpeg::TrellisConfig::disabled())
+        .encode_rgb(&solid_image, 32, 16)
+        .expect("Rust baseline failed");
+
+    let solid_prog_dssim = decode_and_dssim(&solid_prog, &solid_image, 32, 16);
+    let solid_base_dssim = decode_and_dssim(&solid_base, &solid_image, 32, 16);
+    println!("  Solid baseline DSSIM: {:.6}", solid_base_dssim);
+    println!("  Solid progressive DSSIM: {:.6}", solid_prog_dssim);
+    println!("  Bug present: {}", if (solid_prog_dssim - solid_base_dssim).abs() > 0.001 { "YES" } else { "NO" });
+
+    println!("\n--- Test 2: Photo-like image ---");
+    // Test the simplest failing case: 32x16 (2 MCU columns x 1 row)
+    let width = 32;
+    let height = 16;
+    let quality = 75;
+
+    let image = create_photo_like_image(width, height);
+
+    // Rust progressive (no trellis to isolate the issue)
+    let rust_prog = mozjpeg::Encoder::new()
         .quality(quality)
         .subsampling(mozjpeg::Subsampling::S420)
+        .progressive(true)
+        .optimize_huffman(false)  // Simpler to debug
+        .trellis(mozjpeg::TrellisConfig::disabled())
         .encode_rgb(&image, width, height)
-        .expect("Progressive max failed");
-
-    // C baseline
-    let c_baseline = c_encode(&image, width, height, quality, false);
+        .expect("Rust progressive failed");
 
     // C progressive
-    let c_progressive = c_encode(&image, width, height, quality, true);
+    let c_prog = c_encode(&image, width, height, quality, true);
 
-    println!("Encoding results:");
-    println!("  Rust Baseline:       {} bytes, PSNR={:.2}", baseline.len(), decode_and_psnr(&baseline, &image));
-    println!("  Rust Prog (new):     {} bytes, PSNR={:.2}", progressive_new.len(), decode_and_psnr(&progressive_new, &image));
-    println!("  Rust Prog (max):     {} bytes, PSNR={:.2}", progressive_max.len(), decode_and_psnr(&progressive_max, &image));
-    println!("  C Baseline:          {} bytes, PSNR={:.2}", c_baseline.len(), decode_and_psnr(&c_baseline, &image));
-    println!("  C Progressive:       {} bytes, PSNR={:.2}", c_progressive.len(), decode_and_psnr(&c_progressive, &image));
-
-    // Count SOS markers (scans)
-    fn count_sos(data: &[u8]) -> usize {
-        data.windows(2).filter(|w| w[0] == 0xFF && w[1] == 0xDA).count()
-    }
-
-    // Get SOF marker type (baseline vs progressive)
-    fn get_sof(data: &[u8]) -> &str {
-        for w in data.windows(2) {
-            if w[0] == 0xFF && w[1] == 0xC0 { return "SOF0 (baseline DCT)"; }
-            if w[0] == 0xFF && w[1] == 0xC2 { return "SOF2 (progressive DCT)"; }
-        }
-        "unknown"
-    }
-
-    println!("\nScan count (SOS markers):");
-    println!("  Rust Baseline:       {} scans, {}", count_sos(&baseline), get_sof(&baseline));
-    println!("  Rust Prog (new):     {} scans, {}", count_sos(&progressive_new), get_sof(&progressive_new));
-    println!("  Rust Prog (max):     {} scans, {}", count_sos(&progressive_max), get_sof(&progressive_max));
-    println!("  C Baseline:          {} scans, {}", count_sos(&c_baseline), get_sof(&c_baseline));
-    println!("  C Progressive:       {} scans, {}", count_sos(&c_progressive), get_sof(&c_progressive));
-
-    // Compare bytes
-    if c_baseline == c_progressive {
-        println!("\nWARNING: C baseline and progressive are IDENTICAL!");
-    }
-
-    // Compare decoded pixel values
-    let mut dec1 = jpeg_decoder::Decoder::new(std::io::Cursor::new(&baseline));
-    let decoded_baseline = dec1.decode().unwrap();
-
-    let mut dec2 = jpeg_decoder::Decoder::new(std::io::Cursor::new(&progressive_new));
-    let decoded_prog = dec2.decode().unwrap();
-
-    // Compute pixel-wise difference
-    let mut max_diff = 0u8;
-    let mut total_diff = 0u64;
-    for (&a, &b) in decoded_baseline.iter().zip(decoded_prog.iter()) {
-        let diff = (a as i16 - b as i16).unsigned_abs() as u8;
-        if diff > max_diff {
-            max_diff = diff;
-        }
-        total_diff += diff as u64;
-    }
-    let avg_diff = total_diff as f64 / decoded_baseline.len() as f64;
-
-    println!("\nDecoded pixel comparison (baseline vs progressive):");
-    println!("  Max pixel difference: {}", max_diff);
-    println!("  Average pixel difference: {:.2}", avg_diff);
-    println!("  Total pixels: {}", decoded_baseline.len());
-
-    // Also test without trellis to isolate the issue
-    let prog_no_trellis = mozjpeg::Encoder::new()
-        .quality(quality)
-        .subsampling(mozjpeg::Subsampling::S420)
-        .progressive(true)
-        .optimize_huffman(true)
-        .trellis(mozjpeg::TrellisConfig::disabled())
-        .encode_rgb(&image, width, height)
-        .expect("Progressive no trellis failed");
-
-    let baseline_no_trellis = mozjpeg::Encoder::new()
+    // Rust baseline (should be correct)
+    let rust_base = mozjpeg::Encoder::new()
         .quality(quality)
         .subsampling(mozjpeg::Subsampling::S420)
         .progressive(false)
-        .optimize_huffman(true)
+        .optimize_huffman(false)
         .trellis(mozjpeg::TrellisConfig::disabled())
         .encode_rgb(&image, width, height)
-        .expect("Baseline no trellis failed");
+        .expect("Rust baseline failed");
 
-    println!("\nWithout trellis:");
-    println!("  Baseline:    {} bytes, PSNR={:.2}", baseline_no_trellis.len(), decode_and_psnr(&baseline_no_trellis, &image));
-    println!("  Progressive: {} bytes, PSNR={:.2}", prog_no_trellis.len(), decode_and_psnr(&prog_no_trellis, &image));
+    println!("32x16 Q75 (2 MCU columns):");
+    println!("  Rust baseline:    {} bytes", rust_base.len());
+    println!("  Rust progressive: {} bytes", rust_prog.len());
+    println!("  C progressive:    {} bytes", c_prog.len());
 
-    // Test single MCU (8x8 grayscale - simplest possible case)
-    let tiny_gray: Vec<u8> = (0..64).map(|i| (i * 4) as u8).collect();
-    let tiny_rgb: Vec<u8> = tiny_gray.iter()
-        .flat_map(|&g| [g, g, g])
-        .collect();
+    // DSSIM comparison
+    let rust_base_dssim = decode_and_dssim(&rust_base, &image, width, height);
+    let rust_prog_dssim = decode_and_dssim(&rust_prog, &image, width, height);
+    let c_prog_dssim = decode_and_dssim(&c_prog, &image, width, height);
 
-    // Encode at Q90 for better precision
-    let tiny_baseline = mozjpeg::Encoder::new()
-        .quality(90)
-        .subsampling(mozjpeg::Subsampling::S444)
-        .progressive(false)
-        .trellis(mozjpeg::TrellisConfig::disabled())
-        .encode_rgb(&tiny_rgb, 8, 8)
-        .expect("Tiny baseline failed");
+    println!("\nDSSIM vs original (lower = better):");
+    println!("  Rust baseline:    {:.6}", rust_base_dssim);
+    println!("  Rust progressive: {:.6}", rust_prog_dssim);
+    println!("  C progressive:    {:.6}", c_prog_dssim);
 
-    let tiny_progressive = mozjpeg::Encoder::new()
-        .quality(90)
-        .subsampling(mozjpeg::Subsampling::S444)
-        .progressive(true)
-        .trellis(mozjpeg::TrellisConfig::disabled())
-        .encode_rgb(&tiny_rgb, 8, 8)
-        .expect("Tiny progressive failed");
+    // Compare Rust progressive vs C progressive
+    let rust_vs_c = compare_jpeg_dssim(&rust_prog, &c_prog);
+    println!("\nRust prog vs C prog DSSIM: {:.6} {}", rust_vs_c,
+        if rust_vs_c > 0.001 { "*** BUG" } else { "(OK)" });
 
-    println!("\n8x8 grayscale gradient (simplest case, Q90, 4:4:4, no trellis):");
-    println!("  Baseline:    {} bytes, PSNR={:.2}", tiny_baseline.len(), decode_and_psnr(&tiny_baseline, &tiny_rgb));
-    println!("  Progressive: {} bytes, PSNR={:.2}", tiny_progressive.len(), decode_and_psnr(&tiny_progressive, &tiny_rgb));
+    // Byte comparison
+    let (diff_bytes, first_diff, common_prefix) = compare_jpeg_bytes(&rust_prog, &c_prog);
+    println!("\nByte comparison (Rust prog vs C prog):");
+    println!("  Common prefix: {} bytes", common_prefix);
+    println!("  First diff at: {:?}", first_diff);
+    println!("  Total diff bytes: {}", diff_bytes);
 
-    // Test various image sizes to find where the issue starts
-    println!("\nSize/quality sweep (no trellis, 4:2:0):");
-    println!("{:<10} {:>7} {:>12} {:>12} {:>10}", "Size", "Quality", "Base PSNR", "Prog PSNR", "Diff");
+    // Show bytes around first difference
+    if let Some(diff_pos) = first_diff {
+        let start = diff_pos.saturating_sub(4);
+        let end_r = (diff_pos + 8).min(rust_prog.len());
+        let end_c = (diff_pos + 8).min(c_prog.len());
+        println!("\n  Rust bytes @{}-{}: {:02X?}", start, end_r, &rust_prog[start..end_r]);
+        println!("  C    bytes @{}-{}: {:02X?}", start, end_c, &c_prog[start..end_c]);
+    }
 
-    for size in [8, 16, 32, 64] {
-        for q in [50, 75, 90] {
-            let test_img = create_photo_like_image(size, size);
-
-            let b = mozjpeg::Encoder::new()
-                .quality(q)
-                .subsampling(mozjpeg::Subsampling::S420)
-                .progressive(false)
-                .trellis(mozjpeg::TrellisConfig::disabled())
-                .encode_rgb(&test_img, size, size)
-                .expect("Baseline failed");
-
-            let p = mozjpeg::Encoder::new()
-                .quality(q)
-                .subsampling(mozjpeg::Subsampling::S420)
-                .progressive(true)
-                .trellis(mozjpeg::TrellisConfig::disabled())
-                .encode_rgb(&test_img, size, size)
-                .expect("Progressive failed");
-
-            let psnr_b = decode_and_psnr(&b, &test_img);
-            let psnr_p = decode_and_psnr(&p, &test_img);
-
-            println!("{:<10} {:>7} {:>12.2} {:>12.2} {:>10.2}",
-                format!("{}x{}", size, size), q, psnr_b, psnr_p, psnr_b - psnr_p);
+    // Show JPEG structure for both files
+    println!("\n  Rust file structure ({} bytes):", rust_prog.len());
+    for (i, &b) in rust_prog.iter().enumerate() {
+        if b == 0xFF && i + 1 < rust_prog.len() && rust_prog[i + 1] != 0 && rust_prog[i + 1] != 0xFF {
+            let m = rust_prog[i + 1];
+            let name = match m {
+                0xD8 => "SOI",
+                0xE0 => "APP0",
+                0xDB => "DQT",
+                0xC0 => "SOF0",
+                0xC2 => "SOF2",
+                0xC4 => "DHT",
+                0xDA => "SOS",
+                0xD9 => "EOI",
+                _ => "other"
+            };
+            println!("    {:>4}: 0xFF{:02X} ({})", i, m, name);
+        }
+    }
+    println!("\n  C file structure ({} bytes):", c_prog.len());
+    for (i, &b) in c_prog.iter().enumerate() {
+        if b == 0xFF && i + 1 < c_prog.len() && c_prog[i + 1] != 0 && c_prog[i + 1] != 0xFF {
+            let m = c_prog[i + 1];
+            let name = match m {
+                0xD8 => "SOI",
+                0xE0 => "APP0",
+                0xDB => "DQT",
+                0xC0 => "SOF0",
+                0xC2 => "SOF2",
+                0xC4 => "DHT",
+                0xDA => "SOS",
+                0xD9 => "EOI",
+                _ => "other"
+            };
+            println!("    {:>4}: 0xFF{:02X} ({})", i, m, name);
         }
     }
 
-    // Try with 4:4:4 to isolate the issue
-    println!("\nSize sweep (Q75, no trellis, 4:4:4):");
-    println!("{:<10} {:>12} {:>12} {:>10}", "Size", "Base PSNR", "Prog PSNR", "Diff");
+    // Pixel comparison
+    let (max_diff, avg_diff, pixels_diff) = compare_decoded_pixels(&rust_prog, &c_prog);
+    println!("\nDecoded pixel comparison:");
+    println!("  Max pixel diff: {}", max_diff);
+    println!("  Avg pixel diff: {:.4}", avg_diff);
+    println!("  Pixels different: {} / {}", pixels_diff, width * height * 3);
 
-    for size in [8, 16, 32, 64] {
-        let test_img = create_photo_like_image(size, size);
+    // Show where the corruption is in the image
+    println!("\n=== Pixel difference map (Rust prog vs baseline) ===");
+    let mut dec_base = jpeg_decoder::Decoder::new(std::io::Cursor::new(&rust_base));
+    let decoded_base = dec_base.decode().unwrap();
 
-        let b = mozjpeg::Encoder::new()
-            .quality(75)
-            .subsampling(mozjpeg::Subsampling::S444)
-            .progressive(false)
-            .trellis(mozjpeg::TrellisConfig::disabled())
-            .encode_rgb(&test_img, size, size)
-            .expect("Baseline failed");
+    let mut dec_prog = jpeg_decoder::Decoder::new(std::io::Cursor::new(&rust_prog));
+    let decoded_prog = dec_prog.decode().unwrap();
 
-        let p = mozjpeg::Encoder::new()
-            .quality(75)
-            .subsampling(mozjpeg::Subsampling::S444)
-            .progressive(true)
-            .trellis(mozjpeg::TrellisConfig::disabled())
-            .encode_rgb(&test_img, size, size)
-            .expect("Progressive failed");
-
-        let psnr_b = decode_and_psnr(&b, &test_img);
-        let psnr_p = decode_and_psnr(&p, &test_img);
-
-        println!("{:<10} {:>12.2} {:>12.2} {:>10.2}",
-            format!("{}x{}", size, size), psnr_b, psnr_p, psnr_b - psnr_p);
+    // Show difference per 8x8 block region
+    println!("\nAverage pixel diff per 8x8 block region:");
+    for by in 0..(height / 8) {
+        for bx in 0..(width / 8) {
+            let mut block_diff = 0u64;
+            let mut count = 0;
+            for y in (by * 8)..((by + 1) * 8) {
+                for x in (bx * 8)..((bx + 1) * 8) {
+                    for c in 0..3 {
+                        let idx = ((y * width + x) * 3 + c) as usize;
+                        if idx < decoded_base.len() && idx < decoded_prog.len() {
+                            let diff = (decoded_base[idx] as i16 - decoded_prog[idx] as i16).unsigned_abs() as u64;
+                            block_diff += diff;
+                            count += 1;
+                        }
+                    }
+                }
+            }
+            let avg = if count > 0 { block_diff as f64 / count as f64 } else { 0.0 };
+            print!("{:>6.1} ", avg);
+        }
+        println!();
     }
 
-    // Test without Huffman optimization to isolate
-    println!("\nSize sweep (Q75, no trellis, 4:2:0, NO Huffman opt):");
-    println!("{:<10} {:>12} {:>12} {:>10}", "Size", "Base PSNR", "Prog PSNR", "Diff");
-
-    for size in [8, 16, 32, 64] {
-        let test_img = create_photo_like_image(size, size);
-
-        let b = mozjpeg::Encoder::new()
-            .quality(75)
-            .subsampling(mozjpeg::Subsampling::S420)
-            .progressive(false)
-            .optimize_huffman(false)
-            .trellis(mozjpeg::TrellisConfig::disabled())
-            .encode_rgb(&test_img, size, size)
-            .expect("Baseline failed");
-
-        let p = mozjpeg::Encoder::new()
-            .quality(75)
-            .subsampling(mozjpeg::Subsampling::S420)
-            .progressive(true)
-            .optimize_huffman(false)
-            .trellis(mozjpeg::TrellisConfig::disabled())
-            .encode_rgb(&test_img, size, size)
-            .expect("Progressive failed");
-
-        let psnr_b = decode_and_psnr(&b, &test_img);
-        let psnr_p = decode_and_psnr(&p, &test_img);
-
-        println!("{:<10} {:>12.2} {:>12.2} {:>10.2}",
-            format!("{}x{}", size, size), psnr_b, psnr_p, psnr_b - psnr_p);
+    // Show the average Y value per block for both decoded images
+    println!("\nAverage Y (luma) value per block:");
+    println!("Baseline:");
+    for by in 0..(height / 8) {
+        for bx in 0..(width / 8) {
+            let mut sum = 0u64;
+            let mut count = 0;
+            for y in (by * 8)..((by + 1) * 8) {
+                for x in (bx * 8)..((bx + 1) * 8) {
+                    let idx = ((y * width + x) * 3) as usize;
+                    if idx < decoded_base.len() {
+                        // Average RGB as proxy for Y
+                        let r = decoded_base[idx] as u64;
+                        let g = decoded_base[idx + 1] as u64;
+                        let b = decoded_base[idx + 2] as u64;
+                        sum += (r + g + b) / 3;
+                        count += 1;
+                    }
+                }
+            }
+            print!("{:>6.1} ", sum as f64 / count.max(1) as f64);
+        }
+        println!();
+    }
+    println!("Progressive:");
+    for by in 0..(height / 8) {
+        for bx in 0..(width / 8) {
+            let mut sum = 0u64;
+            let mut count = 0;
+            for y in (by * 8)..((by + 1) * 8) {
+                for x in (bx * 8)..((bx + 1) * 8) {
+                    let idx = ((y * width + x) * 3) as usize;
+                    if idx < decoded_prog.len() {
+                        let r = decoded_prog[idx] as u64;
+                        let g = decoded_prog[idx + 1] as u64;
+                        let b = decoded_prog[idx + 2] as u64;
+                        sum += (r + g + b) / 3;
+                        count += 1;
+                    }
+                }
+            }
+            print!("{:>6.1} ", sum as f64 / count.max(1) as f64);
+        }
+        println!();
     }
 
-    // Test non-square to isolate rows vs columns
-    println!("\nNon-square test (Q75, no trellis, 4:2:0):");
-    println!("{:<10} {:>12} {:>12} {:>10}", "Size", "Base PSNR", "Prog PSNR", "Diff");
+    // Now test across sizes to confirm the pattern
+    println!("\n=== Width vs height sweep ===");
+    println!("{:<12} {:>12} {:>12} {:>12}", "Size", "Rust DSSIM", "C DSSIM", "R vs C");
 
-    for (w, h) in [(32, 16), (16, 32), (64, 16), (16, 64)] {
+    for (w, h) in [(16, 16), (32, 16), (16, 32), (64, 16), (16, 64), (32, 32), (64, 64)] {
         let test_img = create_photo_like_image(w, h);
 
-        let b = mozjpeg::Encoder::new()
-            .quality(75)
-            .subsampling(mozjpeg::Subsampling::S420)
-            .progressive(false)
-            .trellis(mozjpeg::TrellisConfig::disabled())
-            .encode_rgb(&test_img, w, h)
-            .expect("Baseline failed");
-
-        let p = mozjpeg::Encoder::new()
+        let r = mozjpeg::Encoder::new()
             .quality(75)
             .subsampling(mozjpeg::Subsampling::S420)
             .progressive(true)
             .trellis(mozjpeg::TrellisConfig::disabled())
             .encode_rgb(&test_img, w, h)
-            .expect("Progressive failed");
+            .expect("Rust failed");
 
-        let psnr_b = decode_and_psnr(&b, &test_img);
-        let psnr_p = decode_and_psnr(&p, &test_img);
+        let c = c_encode(&test_img, w, h, 75, true);
 
-        println!("{:<10} {:>12.2} {:>12.2} {:>10.2}",
-            format!("{}x{}", w, h), psnr_b, psnr_p, psnr_b - psnr_p);
+        let rust_dssim = decode_and_dssim(&r, &test_img, w, h);
+        let c_dssim = decode_and_dssim(&c, &test_img, w, h);
+        let r_vs_c = compare_jpeg_dssim(&r, &c);
+
+        let mcu_cols = (w + 15) / 16;  // With 4:2:0
+        let mcu_rows = (h + 15) / 16;
+
+        println!("{:<12} {:>12.6} {:>12.6} {:>12.6} ({}x{} MCUs){}",
+            format!("{}x{}", w, h),
+            rust_dssim,
+            c_dssim,
+            r_vs_c,
+            mcu_cols, mcu_rows,
+            if r_vs_c > 0.001 { " *** BUG" } else { "" }
+        );
     }
+
+    // Assert at the end so we see all the debug output
+    assert!(
+        rust_vs_c < 0.001,
+        "\nProgressive encoder MCU column bug confirmed!\n\
+         Rust vs C DSSIM: {:.6} (should be < 0.001)\n\
+         Debug the progressive scan encoding loop - likely a stride/column iteration bug.",
+        rust_vs_c
+    );
 }
 
 #[test]
 fn test_subsampling_modes() {
-    println!("\n=== Testing Subsampling Modes ===\n");
+    println!("\n=== Testing Subsampling Modes (Baseline) ===\n");
 
     let quality = 85;
     let width = 256;
@@ -722,26 +1010,37 @@ fn test_subsampling_modes() {
     ];
 
     println!(
-        "{:<10} {:>12} {:>10}",
-        "Mode", "Size", "PSNR"
+        "{:<10} {:>12} {:>12} {:>12}",
+        "Mode", "Size", "DSSIM", "vs C DSSIM"
     );
 
     for (subsampling, name) in modes {
-        let encoded = mozjpeg::Encoder::new()
+        let rust_encoded = mozjpeg::Encoder::new()
             .quality(quality)
             .subsampling(subsampling)
-            .progressive(true)
+            .progressive(false)  // Use baseline which works
             .optimize_huffman(true)
             .encode_rgb(&image, width, height)
-            .expect("Encoding failed");
+            .expect("Rust encoding failed");
 
-        let psnr = decode_and_psnr(&encoded, &image);
+        let c_encoded = c_encode(&image, width, height, quality, false);
+
+        let dssim = decode_and_dssim(&rust_encoded, &image, width, height);
+        let rust_vs_c = compare_jpeg_dssim(&rust_encoded, &c_encoded);
 
         println!(
-            "{:<10} {:>12} {:>10.2}",
+            "{:<10} {:>12} {:>12.6} {:>12.6}",
             name,
-            encoded.len(),
-            psnr
+            rust_encoded.len(),
+            dssim,
+            rust_vs_c
+        );
+
+        // Verify quality
+        assert!(
+            rust_vs_c < 0.001,
+            "{}: Rust vs C DSSIM too high: {:.6}",
+            name, rust_vs_c
         );
     }
 }

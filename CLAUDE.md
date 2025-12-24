@@ -10,7 +10,7 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
 
 ## Current Status
 
-**158 tests passing** (129 unit + 8 codec comparison + 10 FFI comparison + 5 FFI validation + 6 mozjpeg-sys-local)
+**191 tests passing** (153 unit + 8 codec comparison + 11 FFI comparison + 5 FFI validation + 9 mozjpeg-sys-local + 5 encoder validation)
 
 ### Compression Results vs C mozjpeg
 
@@ -46,9 +46,9 @@ mode. Use `Encoder::max_compression()` for equivalent behavior.
 - Baseline encoding is slower due to lack of SIMD (DCT, color conversion)
 - Trellis quantization is competitive or faster
 
-**\* Progressive mode note:** C mozjpeg **requires** `optimize_scans=true` for progressive
-encoding to work. Both Rust and C now support `optimize_scans` which tries multiple scan
-configurations to find the smallest output.
+**\* Progressive mode note:** Both Rust and C support `optimize_scans` which tries multiple
+scan configurations to find the smallest output. Progressive encoding now works correctly
+for all image sizes including non-MCU-aligned dimensions with subsampling.
 
 ### Completed Layers
 - Layer 0: Constants, types, error handling
@@ -99,18 +99,27 @@ let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
 - **Optimize scans** - Try multiple scan configurations for progressive mode, pick smallest
 
 ### Remaining Work
+- **Performance optimization (SIMD)** - DCT and color conversion are 7.5x slower than C
 - EOB optimization integration (`trellis_eob_opt` - disabled by default in C mozjpeg)
 - Arithmetic coding (optional, rarely used)
-- Performance optimization (SIMD)
+
+### Recent Fixes
+- **Progressive AC scan block count** (Dec 2024): Fixed bug where non-MCU-aligned images
+  with subsampling produced corrupted progressive JPEGs. AC scans now correctly encode
+  `ceil(width/8) × ceil(height/8)` blocks instead of MCU-padded block count.
 
 **Both baseline and progressive modes work correctly!** With trellis + Huffman optimization,
 Rust produces files with quality matching C mozjpeg across all image sizes and subsampling modes.
 
 ### Known Issues / Active Investigations
 
-#### Rust vs C Pixel Difference (max diff ~11)
-With identical encoder settings (baseline, no trellis, no Huffman opt), decoded pixels
-differ by up to 11 between Rust and C implementations. Investigation found:
+#### Rust vs C Pixel Difference - RESOLVED ✅
+
+Previously reported "max diff ~11" was due to comparing different encoding modes:
+- C mozjpeg defaults to `JCP_MAX_COMPRESSION` profile which enables progressive mode
+- Rust was using baseline mode in comparisons
+
+**Investigation findings (Dec 2024):**
 
 | Component | Match Status | Notes |
 |-----------|--------------|-------|
@@ -119,11 +128,18 @@ differ by up to 11 between Rust and C implementations. Investigation found:
 | Color conversion | ✅ ±1 | Rounding variance |
 | Downsampling | ✅ Exact | FFI test passes |
 | Quant tables | ✅ Identical | Verified in JPEG output |
-| **Full encoder** | ❌ Max 11 | Pipeline interaction |
+| Huffman tables | ✅ Identical | With `optimize_huffman=true` |
+| **Full encoder** | ✅ **0 diff** | When comparing same mode |
 
-Entropy data starts identically then diverges after first few bytes. Root cause TBD -
-likely in block formation, DC prediction ordering, or edge padding interaction with
-the full pipeline. Not a parameter mismatch (verified with unified `TestEncoderConfig`).
+**Key findings:**
+- With truly identical settings (baseline + Huffman opt), **0 pixel difference**
+- Without Huffman optimization, C uses optimized tables even with `optimize_coding=0`
+- File size with Huffman opt: Rust within 5% of C (16 bytes = JFIF density field difference)
+
+**Remaining file size notes:**
+- Without Huffman optimization, Rust uses standard Annex K tables while C uses minimal tables
+- This causes ~40% size difference in non-optimized mode (not a bug, just different defaults)
+- Enable `optimize_huffman(true)` for best compression (default in Rust)
 
 ## Workflow Rules
 

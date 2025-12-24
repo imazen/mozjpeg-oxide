@@ -219,6 +219,212 @@ pub fn trellis_quantize_block(
     }
 }
 
+/// Perform trellis quantization and return EOB info for cross-block optimization.
+///
+/// This version of trellis quantization returns additional information needed
+/// for cross-block EOB optimization in progressive JPEG.
+///
+/// # Arguments
+/// Same as `trellis_quantize_block`, plus:
+/// * `ss` - Spectral selection start (1 for full block, higher for progressive AC scans)
+/// * `se` - Spectral selection end (63 for full block)
+///
+/// # Returns
+/// `BlockEobInfo` containing costs and EOB status for cross-block optimization.
+pub fn trellis_quantize_block_with_eob_info(
+    src: &[i32; DCTSIZE2],
+    quantized: &mut [i16; DCTSIZE2],
+    qtable: &[u16; DCTSIZE2],
+    ac_table: &DerivedTable,
+    config: &TrellisConfig,
+    ss: usize,
+    se: usize,
+) -> BlockEobInfo {
+    // Calculate per-coefficient lambda weights
+    let mut lambda_tbl = [0.0f32; DCTSIZE2];
+    for i in 0..DCTSIZE2 {
+        let q = qtable[i] as f32;
+        lambda_tbl[i] = 1.0 / (q * q);
+    }
+
+    // Calculate block norm from AC coefficients
+    let mut norm: f32 = 0.0;
+    for i in 1..DCTSIZE2 {
+        let c = src[i] as f32;
+        norm += c * c;
+    }
+    norm /= 63.0;
+
+    // Calculate lambda
+    let lambda = if config.lambda_log_scale2 > 0.0 {
+        let scale1 = 2.0_f32.powf(config.lambda_log_scale1);
+        let scale2 = 2.0_f32.powf(config.lambda_log_scale2);
+        scale1 / (scale2 + norm)
+    } else {
+        2.0_f32.powf(config.lambda_log_scale1 - 12.0)
+    };
+
+    // State for dynamic programming
+    let mut accumulated_zero_dist = [0.0f32; DCTSIZE2];
+    let mut accumulated_cost = [0.0f32; DCTSIZE2];
+    let mut run_start = [0usize; DCTSIZE2];
+
+    // Quantize DC coefficient (simple rounding)
+    {
+        let x = src[0].abs();
+        let sign = if src[0] < 0 { -1i16 } else { 1i16 };
+        let q = 8 * qtable[0] as i32;
+        let qval = (x + q / 2) / q;
+        quantized[0] = (qval as i16) * sign;
+    }
+
+    // Initialize state
+    accumulated_zero_dist[ss - 1] = 0.0;
+    accumulated_cost[ss - 1] = 0.0;
+
+    // Process AC coefficients in zigzag order
+    for i in ss..=se {
+        let z = JPEG_NATURAL_ORDER[i];
+        let x = src[z].abs();
+        let sign = if src[z] < 0 { -1i16 } else { 1i16 };
+        let q = 8 * qtable[z] as i32;
+
+        // Distortion from zeroing this coefficient
+        let zero_dist = (x as f32).powi(2) * lambda * lambda_tbl[z];
+        accumulated_zero_dist[i] = zero_dist + accumulated_zero_dist[i - 1];
+
+        // Quantized value with rounding
+        let qval = (x + q / 2) / q;
+
+        if qval == 0 {
+            quantized[z] = 0;
+            accumulated_cost[i] = f32::MAX;
+            run_start[i] = i - 1;
+            continue;
+        }
+
+        let qval = qval.min(1023);
+
+        // Generate candidate quantized values
+        let num_candidates = jpeg_nbits(qval as i16) as usize;
+        let mut candidates = [(0i32, 0u8, 0.0f32); 16];
+
+        for k in 0..num_candidates {
+            let candidate_val = if k < num_candidates - 1 {
+                (2 << k) - 1
+            } else {
+                qval
+            };
+            let delta = candidate_val * q - x;
+            let dist = (delta as f32).powi(2) * lambda * lambda_tbl[z];
+            candidates[k] = (candidate_val, (k + 1) as u8, dist);
+        }
+
+        // Find optimal choice using dynamic programming
+        accumulated_cost[i] = f32::MAX;
+
+        for j in (ss - 1)..i {
+            let zz = JPEG_NATURAL_ORDER[j];
+            if j != ss - 1 && quantized[zz] == 0 {
+                continue;
+            }
+
+            let zero_run = i - 1 - j;
+
+            let zrl_cost = if zero_run >= 16 {
+                let (_, zrl_size) = ac_table.get_code(0xF0);
+                if zrl_size == 0 {
+                    continue;
+                }
+                (zero_run / 16) * zrl_size as usize
+            } else {
+                0
+            };
+
+            let run_mod_16 = zero_run & 15;
+
+            for k in 0..num_candidates {
+                let (candidate_val, candidate_bits, candidate_dist) = candidates[k];
+
+                let symbol = ((run_mod_16 as u8) << 4) | candidate_bits;
+                let (_, code_size) = ac_table.get_code(symbol);
+                if code_size == 0 {
+                    continue;
+                }
+
+                let rate = code_size as usize + candidate_bits as usize + zrl_cost;
+
+                let zero_run_dist = accumulated_zero_dist[i - 1] - accumulated_zero_dist[j];
+                let prev_cost = if j == ss - 1 { 0.0 } else { accumulated_cost[j] };
+                let cost = rate as f32 + candidate_dist + zero_run_dist + prev_cost;
+
+                if cost < accumulated_cost[i] {
+                    quantized[z] = (candidate_val as i16) * sign;
+                    accumulated_cost[i] = cost;
+                    run_start[i] = j;
+                }
+            }
+        }
+    }
+
+    // Find optimal ending point
+    let eob_cost = {
+        let (_, eob_size) = ac_table.get_code(0x00);
+        eob_size as f32
+    };
+
+    let total_zero_dist = accumulated_zero_dist[se];
+    let mut best_cost = total_zero_dist + eob_cost;
+    let mut best_cost_skip = total_zero_dist; // Cost without EOB
+    let mut last_coeff_idx = ss - 1;
+
+    for i in ss..=se {
+        let z = JPEG_NATURAL_ORDER[i];
+        if quantized[z] != 0 {
+            let tail_zero_dist = accumulated_zero_dist[se] - accumulated_zero_dist[i];
+            let cost_wo_eob = accumulated_cost[i] + tail_zero_dist;
+            let mut cost = cost_wo_eob;
+            if i < se {
+                cost += eob_cost;
+            }
+
+            if cost < best_cost {
+                best_cost = cost;
+                best_cost_skip = cost_wo_eob;
+                last_coeff_idx = i;
+            }
+        }
+    }
+
+    // Zero out coefficients after optimal ending and those in runs
+    let mut i = se;
+    while i >= ss {
+        while i > last_coeff_idx {
+            let z = JPEG_NATURAL_ORDER[i];
+            quantized[z] = 0;
+            i -= 1;
+        }
+        if i >= ss {
+            last_coeff_idx = run_start[i];
+            if i == 0 {
+                break;
+            }
+            i -= 1;
+        }
+    }
+
+    // Compute EOB info
+    compute_block_eob_info(
+        quantized,
+        total_zero_dist,
+        best_cost,
+        best_cost_skip,
+        last_coeff_idx,
+        ss,
+        se,
+    )
+}
+
 /// Maximum number of DC trellis candidates
 const DC_TRELLIS_MAX_CANDIDATES: usize = 9;
 
@@ -411,6 +617,206 @@ pub fn dc_trellis_optimize_indexed(
 
     // Return the last DC value for next component
     dc_candidate[best_final][num_blocks - 1]
+}
+
+/// Information about a block's EOB status for cross-block optimization.
+#[derive(Debug, Clone, Copy)]
+pub struct BlockEobInfo {
+    /// Cost of making all AC coefficients in this block zero
+    pub zero_block_cost: f32,
+    /// Cost of encoding this block optimally (with non-zero coefficients)
+    pub best_cost: f32,
+    /// Cost without the EOB marker (for cross-block chaining)
+    pub best_cost_skip: f32,
+    /// EOB status: 0 = no EOB needed (last coef at Se), 1 = needs EOB, 2 = all-zero block
+    pub requires_eob: u8,
+    /// Whether this block has any non-zero AC coefficients
+    pub has_nonzero_ac: bool,
+}
+
+/// Optimize EOB runs across a row of blocks.
+///
+/// This function implements cross-block EOB optimization for progressive JPEG.
+/// It finds the optimal placement of EOBRUN codes to minimize the total encoding cost.
+///
+/// # Arguments
+/// * `blocks` - Quantized coefficient blocks (will be modified to zero out run blocks)
+/// * `block_info` - Per-block EOB information computed during trellis quantization
+/// * `ac_table` - AC Huffman table for EOBRUN cost estimation
+/// * `ss` - Spectral selection start (first AC coefficient index)
+/// * `se` - Spectral selection end (last AC coefficient index)
+///
+/// # Returns
+/// The number of blocks that were zeroed as part of runs.
+pub fn optimize_eob_runs(
+    blocks: &mut [[i16; DCTSIZE2]],
+    block_info: &[BlockEobInfo],
+    ac_table: &DerivedTable,
+    ss: usize,
+    se: usize,
+) -> usize {
+    let num_blocks = blocks.len();
+    if num_blocks == 0 || ss >= se {
+        return 0;
+    }
+
+    // Accumulated cost arrays for dynamic programming
+    let mut accumulated_zero_block_cost = vec![0.0f32; num_blocks + 1];
+    let mut accumulated_block_cost = vec![0.0f32; num_blocks + 1];
+    let mut block_run_start = vec![0usize; num_blocks];
+
+    // Initialize with first block's zero cost
+    accumulated_zero_block_cost[0] = 0.0;
+    accumulated_block_cost[0] = 0.0;
+
+    // Forward pass: compute optimal costs
+    for bi in 0..num_blocks {
+        accumulated_zero_block_cost[bi + 1] =
+            accumulated_zero_block_cost[bi] + block_info[bi].zero_block_cost;
+
+        // If this block is all-zero, it can only extend a run
+        if block_info[bi].requires_eob == 2 {
+            block_run_start[bi] = 0;
+            accumulated_block_cost[bi + 1] = accumulated_zero_block_cost[bi + 1];
+            continue;
+        }
+
+        // Try starting a zero-block run from each previous position
+        let mut best_cost = f32::MAX;
+        let mut best_start = 0;
+
+        for i in 0..=bi {
+            // Skip if starting block is all-zero (can't start a run from there)
+            if block_info[i].requires_eob == 2 {
+                continue;
+            }
+
+            // Cost = cost of encoding block bi + cost of zeroing blocks i to bi-1 + EOBRUN cost
+            let mut cost = block_info[bi].best_cost_skip;
+            cost += accumulated_zero_block_cost[bi] - accumulated_zero_block_cost[i];
+            if i > 0 {
+                cost += accumulated_block_cost[i];
+            }
+
+            // EOBRUN cost: encode the number of zero blocks
+            let zero_block_run = bi - i + block_info[i].requires_eob as usize;
+            if zero_block_run > 0 {
+                let nbits = jpeg_nbits(zero_block_run as i16) as usize;
+                // EOBRUN symbol is at position 16*nbits in the Huffman table
+                let (_, eobrun_size) = ac_table.get_code((16 * nbits) as u8);
+                if eobrun_size > 0 {
+                    cost += eobrun_size as f32 + nbits as f32;
+                } else {
+                    // Fallback if EOBRUN symbol not available
+                    cost += 16.0;
+                }
+            }
+
+            if cost < best_cost {
+                best_cost = cost;
+                best_start = i;
+            }
+        }
+
+        block_run_start[bi] = best_start;
+        accumulated_block_cost[bi + 1] = best_cost;
+    }
+
+    // Find optimal ending point
+    let mut last_block = num_blocks;
+    let mut best_cost = f32::MAX;
+
+    for i in 0..=num_blocks {
+        if i > 0 && block_info[i - 1].requires_eob == 2 {
+            continue;
+        }
+
+        let mut cost = accumulated_zero_block_cost[num_blocks] - accumulated_zero_block_cost[i];
+
+        // Add EOBRUN cost for trailing zero blocks
+        let zero_block_run = num_blocks - i + if i > 0 { block_info[i - 1].requires_eob as usize } else { 0 };
+        if zero_block_run > 0 && i < num_blocks {
+            let nbits = jpeg_nbits(zero_block_run as i16) as usize;
+            let (_, eobrun_size) = ac_table.get_code((16 * nbits) as u8);
+            if eobrun_size > 0 {
+                cost += eobrun_size as f32 + nbits as f32;
+            }
+        }
+
+        if i > 0 {
+            cost += accumulated_block_cost[i];
+        }
+
+        if cost < best_cost {
+            best_cost = cost;
+            last_block = i;
+        }
+    }
+
+    // Backward pass: zero out blocks that are part of runs
+    let mut zeroed_count = 0;
+    if last_block > 0 {
+        last_block -= 1;
+    }
+
+    let mut bi = num_blocks;
+    while bi > 0 {
+        bi -= 1;
+        while bi >= last_block && bi < num_blocks {
+            // Zero out AC coefficients in this block
+            for j in ss..=se {
+                let z = JPEG_NATURAL_ORDER[j];
+                if blocks[bi][z] != 0 {
+                    blocks[bi][z] = 0;
+                    zeroed_count += 1;
+                }
+            }
+            if bi == 0 {
+                break;
+            }
+            bi -= 1;
+        }
+        if bi > 0 && bi <= last_block {
+            last_block = block_run_start[bi];
+            if last_block > 0 {
+                last_block -= 1;
+            }
+        }
+    }
+
+    zeroed_count
+}
+
+/// Compute EOB info for a single block during trellis quantization.
+///
+/// This is called after trellis quantization to record information needed
+/// for cross-block EOB optimization.
+pub fn compute_block_eob_info(
+    block: &[i16; DCTSIZE2],
+    zero_dist: f32,
+    best_cost: f32,
+    best_cost_skip: f32,
+    last_coeff_idx: usize,
+    ss: usize,
+    se: usize,
+) -> BlockEobInfo {
+    // Determine EOB status
+    let has_nonzero_ac = (ss..=se).any(|i| block[JPEG_NATURAL_ORDER[i]] != 0);
+    let requires_eob = if !has_nonzero_ac {
+        2 // All-zero block
+    } else if last_coeff_idx >= se {
+        0 // No EOB needed (last coef at end)
+    } else {
+        1 // Needs EOB
+    };
+
+    BlockEobInfo {
+        zero_block_cost: zero_dist,
+        best_cost,
+        best_cost_skip,
+        requires_eob,
+        has_nonzero_ac,
+    }
 }
 
 /// Quantize a block with simple rounding (no trellis optimization).

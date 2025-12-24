@@ -81,7 +81,10 @@ pub use sample::{
     subsampled_dimensions, mcu_aligned_dimensions, expand_to_mcu,
 };
 
-pub use trellis::{trellis_quantize_block, simple_quantize_block};
+pub use trellis::{
+    trellis_quantize_block, trellis_quantize_block_with_eob_info,
+    simple_quantize_block, optimize_eob_runs, BlockEobInfo, compute_block_eob_info,
+};
 
 pub use progressive::{
     generate_simple_progressive_scans, generate_standard_progressive_scans,

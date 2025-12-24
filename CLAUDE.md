@@ -77,9 +77,14 @@ let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
 - **Quality presets** - `max_compression()` and `fastest()`
 
 ### Remaining Work
-- EOB optimization across blocks (trellis_eob_opt)
+- **EOB optimization integration** - Core algorithm implemented (`optimize_eob_runs`, `BlockEobInfo`),
+  pending encoder pipeline integration
 - Optional: deringing, arithmetic coding
 - Performance optimization (SIMD)
+
+Note: The remaining ~3% file size gap vs C mozjpeg is NOT due to trellis_eob_opt (which is
+disabled by default in C mozjpeg). The gap may be due to subtle differences in the trellis
+algorithm or other optimizations.
 
 ## Workflow Rules
 

@@ -32,6 +32,9 @@ fn main() {
     println!("Benchmark: {}x{} image ({} pixels)\n", width, height, width * height);
 
     // Test configurations
+    // Note: C mozjpeg requires optimize_scans=true for progressive mode to work.
+    // Rust doesn't implement optimize_scans yet, so progressive comparisons aren't
+    // fully apples-to-apples (C is doing more work).
     let configs = [
         ("Baseline (no opts)", TestEncoderConfig {
             quality: 85,
@@ -41,6 +44,7 @@ fn main() {
             trellis_quant: false,
             trellis_dc: false,
             overshoot_deringing: false,
+            optimize_scans: false,
         }),
         ("Huffman optimized", TestEncoderConfig {
             quality: 85,
@@ -50,6 +54,7 @@ fn main() {
             trellis_quant: false,
             trellis_dc: false,
             overshoot_deringing: false,
+            optimize_scans: false,
         }),
         ("Trellis AC", TestEncoderConfig {
             quality: 85,
@@ -59,6 +64,7 @@ fn main() {
             trellis_quant: true,
             trellis_dc: false,
             overshoot_deringing: false,
+            optimize_scans: false,
         }),
         ("Trellis AC+DC", TestEncoderConfig {
             quality: 85,
@@ -68,8 +74,10 @@ fn main() {
             trellis_quant: true,
             trellis_dc: true,
             overshoot_deringing: false,
+            optimize_scans: false,
         }),
-        ("Progressive", TestEncoderConfig {
+        // Progressive requires optimize_scans=true in C mozjpeg
+        ("Progressive*", TestEncoderConfig {
             quality: 85,
             subsampling: Subsampling::S420,
             progressive: true,
@@ -77,8 +85,9 @@ fn main() {
             trellis_quant: false,
             trellis_dc: false,
             overshoot_deringing: false,
+            optimize_scans: true, // Required for C, Rust doesn't have this feature
         }),
-        ("Max compression", TestEncoderConfig {
+        ("Max compression*", TestEncoderConfig {
             quality: 85,
             subsampling: Subsampling::S420,
             progressive: true,
@@ -86,6 +95,7 @@ fn main() {
             trellis_quant: true,
             trellis_dc: true,
             overshoot_deringing: false,
+            optimize_scans: true, // Required for C, Rust doesn't have this feature
         }),
     ];
 
@@ -129,6 +139,8 @@ fn main() {
     }
 
     println!("\nNote: Ratio > 1.0 means Rust is slower than C");
+    println!("      * = C has optimize_scans enabled (required for progressive)");
+    println!("          Rust doesn't implement optimize_scans, so C is doing more work");
 }
 
 fn encode_c(data: &[u8], width: u32, height: u32, config: &TestEncoderConfig) -> Vec<u8> {
@@ -185,6 +197,8 @@ fn encode_c(data: &[u8], width: u32, height: u32, config: &TestEncoderConfig) ->
             if config.trellis_dc { 1 } else { 0 });
         jpeg_c_set_bool_param(&mut cinfo, JBOOLEAN_OVERSHOOT_DERINGING,
             if config.overshoot_deringing { 1 } else { 0 });
+        jpeg_c_set_bool_param(&mut cinfo, JBOOLEAN_OPTIMIZE_SCANS,
+            if config.optimize_scans { 1 } else { 0 });
 
         jpeg_start_compress(&mut cinfo, 1);
 

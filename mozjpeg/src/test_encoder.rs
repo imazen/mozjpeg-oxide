@@ -15,6 +15,9 @@ pub struct TestEncoderConfig {
     pub trellis_quant: bool,
     pub trellis_dc: bool,
     pub overshoot_deringing: bool,
+    /// C mozjpeg's optimize_scans feature (tries multiple scan configurations).
+    /// Rust doesn't implement this yet, so set to false for fair comparison.
+    pub optimize_scans: bool,
 }
 
 impl Default for TestEncoderConfig {
@@ -27,6 +30,7 @@ impl Default for TestEncoderConfig {
             trellis_quant: false,
             trellis_dc: false,
             overshoot_deringing: false,
+            optimize_scans: false,
         }
     }
 }
@@ -69,6 +73,7 @@ pub fn encode_rust(rgb: &[u8], width: u32, height: u32, config: &TestEncoderConf
         .progressive(config.progressive)
         .optimize_huffman(config.optimize_huffman)
         .trellis(trellis)
+        .overshoot_deringing(config.overshoot_deringing)
         .encode_rgb(rgb, width, height)
         .expect("Rust encoding failed")
 }

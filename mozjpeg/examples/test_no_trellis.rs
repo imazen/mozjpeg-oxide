@@ -1,11 +1,21 @@
 //! Compare Rust vs C mozjpeg with trellis disabled
+//!
+//! Run `./scripts/fetch-corpus.sh` first to download test images,
+//! or uses bundled test image if corpus not available.
 
+use mozjpeg::corpus::{bundled_test_image, kodak_dir};
 use std::fs;
+use std::path::PathBuf;
 
 fn main() {
-    let path = "/home/lilith/work/codec-comparison/codec-corpus/kodak/1.png";
-    
-    let file = fs::File::open(path).unwrap();
+    // Try kodak corpus first, fall back to bundled test image
+    let path: PathBuf = kodak_dir()
+        .map(|d| d.join("1.png"))
+        .filter(|p| p.exists())
+        .or_else(|| bundled_test_image("1.png"))
+        .expect("No test image found. Run ./scripts/fetch-corpus.sh or check bundled images.");
+
+    let file = fs::File::open(&path).unwrap();
     let decoder = png::Decoder::new(file);
     let mut reader = decoder.read_info().unwrap();
     let mut buf = vec![0; reader.output_buffer_size()];
@@ -43,11 +53,14 @@ fn main() {
     println!("Ratio (Rust baseline / C):    {:.4}",
              rust_baseline.len() as f64 / c_jpeg.len() as f64);
 
-    // Save files for analysis
-    fs::write("/tmp/rust_progressive.jpg", &rust_progressive).unwrap();
-    fs::write("/tmp/c_mozjpeg.jpg", &c_jpeg).unwrap();
+    // Save files for analysis (cross-platform temp directory)
+    let temp_dir = std::env::temp_dir();
+    let rust_path = temp_dir.join("rust_progressive.jpg");
+    let c_path = temp_dir.join("c_mozjpeg.jpg");
+    fs::write(&rust_path, &rust_progressive).unwrap();
+    fs::write(&c_path, &c_jpeg).unwrap();
     println!();
-    println!("Files saved to /tmp/rust_progressive.jpg and /tmp/c_mozjpeg.jpg");
+    println!("Files saved to {:?} and {:?}", rust_path, c_path);
 
     // Count SOS markers (number of scans)
     let rust_scans = rust_progressive.windows(2).filter(|w| *w == [0xFF, 0xDA]).count();

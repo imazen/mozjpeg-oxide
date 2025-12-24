@@ -14,10 +14,9 @@
 //! Note: codec-eval integration test is currently disabled due to API
 //! compatibility issues (see test_codec_eval_session).
 
+// codec-eval from https://github.com/imazen/codec-comparison
 #[allow(unused_imports)]
-use codec_eval::{
-    EvalConfig, EvalSession, ImageData, MetricConfig, ViewingCondition,
-};
+use codec_eval::{EvalConfig, EvalSession, ImageData, MetricConfig, ViewingCondition};
 
 use dssim::Dssim;
 

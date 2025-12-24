@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+        # Skip clippy on Windows for now due to potential FFI issues
+        if: runner.os != 'Windows'
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Run unit tests
+        run: cargo test --lib -p mozjpeg
+
+      - name: Run codec comparison tests
+        run: cargo test --test codec_comparison -p mozjpeg
+
+      - name: Run FFI validation tests (crates.io mozjpeg-sys)
+        run: cargo test --test ffi_validation -p mozjpeg
+
+  # Separate job for tests requiring local mozjpeg source
+  # This is disabled by default as it requires cloning the C mozjpeg repo
+  test-ffi-local:
+    name: Test FFI Comparison (Local mozjpeg)
+    runs-on: ubuntu-latest
+    if: false  # Disabled - requires ../mozjpeg C source
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone mozjpeg C source
+        run: |
+          cd ..
+          git clone --depth=1 https://github.com/nickcamel/mozjpeg.git mozjpeg
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake nasm
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Run FFI comparison tests
+        run: cargo test --test ffi_comparison -p mozjpeg
+
+      - name: Run mozjpeg-sys-local tests
+        run: cargo test -p mozjpeg-sys-local
+
+  # Documentation build
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Build documentation
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # Minimum supported Rust version check
+  msrv:
+    name: MSRV (1.70.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.70.0
+        uses: dtolnay/rust-action@1.70.0
+
+      - name: Build with MSRV
+        run: cargo build --workspace

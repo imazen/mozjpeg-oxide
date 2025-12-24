@@ -83,6 +83,7 @@ fn main() {
                 trellis_quant: false,
                 trellis_dc: false,
                 overshoot_deringing: false,
+                optimize_scans: false,
             };
 
             // Encode with Rust (using unified API)
@@ -338,6 +339,11 @@ fn encode_c(data: &[u8], width: u32, height: u32, config: &TestEncoderConfig) ->
             &mut cinfo,
             JBOOLEAN_OVERSHOOT_DERINGING,
             if config.overshoot_deringing { 1 } else { 0 },
+        );
+        jpeg_c_set_bool_param(
+            &mut cinfo,
+            JBOOLEAN_OPTIMIZE_SCANS,
+            if config.optimize_scans { 1 } else { 0 },
         );
 
         jpeg_start_compress(&mut cinfo, 1);

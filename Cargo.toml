@@ -20,7 +20,9 @@ png = "0.17"
 proptest = "1.4"
 criterion = "0.5"
 jpeg-decoder = "0.3"
-codec-eval = { path = "../codec-comparison" }
 
 # FFI
 libc = "0.2"
+
+# Codec testing infrastructure from https://github.com/imazen/codec-comparison
+# Use directly in crates that need it (can't be optional in workspace deps)

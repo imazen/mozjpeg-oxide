@@ -1,16 +1,24 @@
 //! Benchmark against codec-corpus images.
 //!
 //! Compares Rust mozjpeg encoder against C mozjpeg for real-world images.
+//!
+//! Run `./scripts/fetch-corpus.sh` first to download test images,
+//! or set CODEC_CORPUS_DIR to your codec-corpus location.
 
+use mozjpeg::corpus::all_corpus_dirs;
 use std::fs;
 use std::io::Cursor;
 use std::path::Path;
 
 fn main() {
-    let corpus_dirs = [
-        "/home/lilith/work/codec-comparison/codec-corpus/kodak",
-        "/home/lilith/work/codec-comparison/codec-corpus/clic2025/validation",
-    ];
+    let corpus_dirs = all_corpus_dirs();
+
+    if corpus_dirs.is_empty() {
+        eprintln!("No corpus directories found. Please run:");
+        eprintln!("  ./scripts/fetch-corpus.sh");
+        eprintln!("Or set CODEC_CORPUS_DIR environment variable.");
+        std::process::exit(1);
+    }
 
     let mut total_rust_bytes = 0u64;
     let mut total_c_bytes = 0u64;
@@ -24,10 +32,10 @@ fn main() {
     println!("{}", "-".repeat(102));
 
     for corpus_dir in &corpus_dirs {
-        let dir = match fs::read_dir(corpus_dir) {
+        let dir = match fs::read_dir(&corpus_dir) {
             Ok(d) => d,
             Err(_) => {
-                eprintln!("Skipping {}: not found", corpus_dir);
+                eprintln!("Skipping {:?}: not found", corpus_dir);
                 continue;
             }
         };

@@ -8,9 +8,13 @@ description = "Rust port of Mozilla's mozjpeg JPEG encoder with trellis quantiza
 [features]
 default = []
 simd = []
+# Enable PNG loading in corpus module (enabled by default in dev)
+png = ["dep:png"]
 
 [dependencies]
 bytemuck = { workspace = true }
+# Optional PNG support for corpus loading
+png = { workspace = true, optional = true }
 
 [dev-dependencies]
 dssim = { workspace = true }
@@ -20,12 +24,13 @@ png = { workspace = true }
 proptest = { workspace = true }
 criterion = { workspace = true }
 jpeg-decoder = { workspace = true }
-codec-eval = { workspace = true }
 libc = "0.2"
 # Use existing mozjpeg-sys from crates.io for basic FFI validation
 mozjpeg-sys = "2.2"
 # Local mozjpeg-sys with granular test exports for layer-by-layer validation
 mozjpeg-sys-local = { path = "../mozjpeg-sys" }
+# Codec testing infrastructure from https://github.com/imazen/codec-comparison
+codec-eval = { git = "https://github.com/imazen/codec-comparison" }
 
 [[bench]]
 name = "encode"

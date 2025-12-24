@@ -198,6 +198,15 @@ extern "C" {
         output: *mut JSAMPLE,
         width: JDIMENSION,
     );
+
+    /// Overshoot deringing preprocessing (from jcdctmgr.c)
+    /// Applies deringing to level-shifted (centered) 8x8 block samples
+    /// data: 64 level-shifted samples (-128 to +127)
+    /// dc_quant: DC quantization value (used to limit overshoot)
+    pub fn mozjpeg_test_preprocess_deringing(
+        data: *mut DCTELEM,
+        dc_quant: UINT16,
+    );
 }
 
 // Version constant for jpeg_CreateCompress
@@ -362,6 +371,85 @@ mod tests {
         // Just verify output is in reasonable range
         for (i, &val) in output.iter().enumerate() {
             assert!(val >= 100 && val <= 180, "output[{}] = {} out of expected range", i, val);
+        }
+    }
+
+    #[test]
+    fn test_preprocess_deringing_no_max_pixels() {
+        // Block with no pixels at max value - should be unchanged
+        let mut data = [64i16; 64];
+        let original = data;
+
+        unsafe {
+            mozjpeg_test_preprocess_deringing(data.as_mut_ptr(), 16);
+        }
+
+        assert_eq!(data, original, "Block with no max pixels should be unchanged");
+    }
+
+    #[test]
+    fn test_preprocess_deringing_all_max_pixels() {
+        // Block with all pixels at max value (127) - should be unchanged
+        let max_sample: i16 = 127; // 255 - 128
+        let mut data = [max_sample; 64];
+        let original = data;
+
+        unsafe {
+            mozjpeg_test_preprocess_deringing(data.as_mut_ptr(), 16);
+        }
+
+        assert_eq!(data, original, "Block with all max pixels should be unchanged");
+    }
+
+    #[test]
+    fn test_preprocess_deringing_creates_overshoot() {
+        // Natural order (zigzag) indices for testing
+        // These are the zigzag scan order from JPEG spec
+        const NATURAL_ORDER: [usize; 64] = [
+            0,  1,  8, 16,  9,  2,  3, 10,
+           17, 24, 32, 25, 18, 11,  4,  5,
+           12, 19, 26, 33, 40, 48, 41, 34,
+           27, 20, 13,  6,  7, 14, 21, 28,
+           35, 42, 49, 56, 57, 50, 43, 36,
+           29, 22, 15, 23, 30, 37, 44, 51,
+           58, 59, 52, 45, 38, 31, 39, 46,
+           53, 60, 61, 54, 47, 55, 62, 63,
+        ];
+
+        let max_sample: i16 = 127;
+        let mut data = [0i16; 64];
+
+        // Set some pixels to max value (indices 10-15 in natural order)
+        for i in 10..16 {
+            data[NATURAL_ORDER[i]] = max_sample;
+        }
+        // Set surrounding pixels to create a slope
+        data[NATURAL_ORDER[8]] = 80;
+        data[NATURAL_ORDER[9]] = 100;
+        data[NATURAL_ORDER[16]] = 100;
+        data[NATURAL_ORDER[17]] = 80;
+
+        unsafe {
+            mozjpeg_test_preprocess_deringing(data.as_mut_ptr(), 16);
+        }
+
+        // Check that some overshoot occurred
+        let mut has_overshoot = false;
+        for i in 10..16 {
+            if data[NATURAL_ORDER[i]] > max_sample {
+                has_overshoot = true;
+                break;
+            }
+        }
+        assert!(has_overshoot, "C deringing should create overshoot above max_sample");
+
+        // Check that overshoot is limited (max 31 above max_sample)
+        for i in 10..16 {
+            assert!(
+                data[NATURAL_ORDER[i]] <= max_sample + 31,
+                "C deringing overshoot should be limited to max_sample + 31, got {}",
+                data[NATURAL_ORDER[i]]
+            );
         }
     }
 }

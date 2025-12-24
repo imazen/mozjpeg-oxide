@@ -1,31 +1,70 @@
 //! Compare Rust vs C mozjpeg encoder with real images.
 //!
 //! Run with: cargo run --example compare_real_images
+//!
+//! Requires corpus images. Run `./scripts/fetch-corpus.sh --full` first,
+//! or set CODEC_CORPUS_DIR to your codec-corpus location.
 
+use mozjpeg::corpus::{clic_validation_dir, png_files_in_dir};
 use mozjpeg::{Encoder, Subsampling};
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 
 fn main() {
-    let source_dir = "/home/lilith/work/codec-comparison/codec-corpus/clic2025/validation";
-    let output_dir = "/mnt/v/work/mozjpeg-rs";
+    let source_dir = match clic_validation_dir() {
+        Some(dir) => dir,
+        None => {
+            eprintln!("CLIC corpus not found. Please run:");
+            eprintln!("  ./scripts/fetch-corpus.sh --full");
+            eprintln!("Or set CODEC_CORPUS_DIR environment variable.");
+            std::process::exit(1);
+        }
+    };
 
-    // Pick a few images to compare
-    let images = [
+    // Output to comparison_outputs in project root
+    let output_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("comparison_outputs");
+    fs::create_dir_all(&output_dir).unwrap();
+
+    // Specific images chosen for testing (different sizes/content)
+    let preferred_images = [
         "4cd6910a0b7b39365fda5df87618d091.png", // Smaller one (398KB)
         "097cb426910ba8ce2525dd8bb7fb1777.png", // Medium (2.5MB)
     ];
 
+    // Use preferred images if they exist, otherwise fall back to first 2 in directory
+    let images: Vec<_> = {
+        let preferred: Vec<_> = preferred_images
+            .iter()
+            .map(|name| source_dir.join(name))
+            .filter(|p| p.exists())
+            .collect();
+
+        if !preferred.is_empty() {
+            preferred
+        } else {
+            // Fall back to first 2 PNG files
+            png_files_in_dir(&source_dir).into_iter().take(2).collect()
+        }
+    };
+
+    if images.is_empty() {
+        eprintln!("No PNG files found in {:?}", source_dir);
+        std::process::exit(1);
+    }
+
     let quality = 75;
 
-    for image_name in &images {
-        let source_path = format!("{}/{}", source_dir, image_name);
-        let stem = image_name.trim_end_matches(".png");
+    for source_path in &images {
+        let image_name = source_path.file_name().unwrap().to_string_lossy();
+        let stem = source_path.file_stem().unwrap().to_string_lossy();
 
         println!("Processing: {}", image_name);
 
         // Load PNG
-        let decoder = png::Decoder::new(fs::File::open(&source_path).unwrap());
+        let decoder = png::Decoder::new(fs::File::open(source_path).unwrap());
         let mut reader = decoder.read_info().unwrap();
         let mut buf = vec![0; reader.output_buffer_size()];
         let info = reader.next_frame(&mut buf).unwrap();
@@ -40,7 +79,10 @@ fn main() {
         // Handle different color types
         let rgb_data: Vec<u8> = if bytes_per_pixel == 4 {
             // RGBA -> RGB
-            rgb_data.chunks(4).flat_map(|c| [c[0], c[1], c[2]]).collect()
+            rgb_data
+                .chunks(4)
+                .flat_map(|c| [c[0], c[1], c[2]])
+                .collect()
         } else if bytes_per_pixel == 3 {
             rgb_data.to_vec()
         } else {
@@ -58,23 +100,27 @@ fn main() {
         let c_jpeg = unsafe { encode_with_c_mozjpeg(&rgb_data, width, height, quality) };
 
         // Save outputs
-        let rust_path = format!("{}/{}_rust_q{}.jpg", output_dir, stem, quality);
-        let c_path = format!("{}/{}_cmozjpeg_q{}.jpg", output_dir, stem, quality);
+        let rust_path = output_dir.join(format!("{}_rust_q{}.jpg", stem, quality));
+        let c_path = output_dir.join(format!("{}_cmozjpeg_q{}.jpg", stem, quality));
 
         fs::write(&rust_path, &rust_jpeg).unwrap();
         fs::write(&c_path, &c_jpeg).unwrap();
 
-        // Also copy original PNG
-        let orig_path = format!("{}/{}", output_dir, image_name);
-        fs::copy(&source_path, &orig_path).unwrap();
+        // Also copy original PNG for comparison
+        let orig_path = output_dir.join(&*image_name);
+        fs::copy(source_path, &orig_path).unwrap();
 
-        println!("  Rust:     {:>8} bytes -> {}", rust_jpeg.len(), rust_path);
-        println!("  C mozjpeg:{:>8} bytes -> {}", c_jpeg.len(), c_path);
-        println!("  Original copied to: {}", orig_path);
+        println!("  Rust:     {:>8} bytes -> {:?}", rust_jpeg.len(), rust_path);
+        println!(
+            "  C mozjpeg:{:>8} bytes -> {:?}",
+            c_jpeg.len(),
+            c_path
+        );
+        println!("  Original copied to: {:?}", orig_path);
         println!();
     }
 
-    println!("Done! View at: V:\\work\\mozjpeg-rs\\");
+    println!("Done! Outputs in: {:?}", output_dir);
 }
 
 unsafe fn encode_with_c_mozjpeg(rgb_data: &[u8], width: u32, height: u32, quality: u8) -> Vec<u8> {

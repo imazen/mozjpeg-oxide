@@ -1,2 +1,16 @@
 /target
 Cargo.lock
+
+# Downloaded corpus and comparison outputs
+/corpus/
+/comparison_outputs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

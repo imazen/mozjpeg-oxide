@@ -1,11 +1,19 @@
 //! Test 4:4:4 subsampling comparison
+//!
+//! Run `./scripts/fetch-corpus.sh` first to download test images.
 
+use mozjpeg::corpus::kodak_dir;
 use std::fs;
 
 fn main() {
-    let corpus_dirs = [
-        "/home/lilith/work/codec-comparison/codec-corpus/kodak",
-    ];
+    let corpus_dir = match kodak_dir() {
+        Some(dir) => dir,
+        None => {
+            eprintln!("Kodak corpus not found. Please run:");
+            eprintln!("  ./scripts/fetch-corpus.sh");
+            std::process::exit(1);
+        }
+    };
 
     let mut total_rust_bytes = 0u64;
     let mut total_c_bytes = 0u64;
@@ -13,40 +21,45 @@ fn main() {
 
     println!("Comparing Rust vs C mozjpeg at Q75 with 4:4:4 subsampling\n");
 
-    for corpus_dir in &corpus_dirs {
-        let dir = match fs::read_dir(corpus_dir) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
+    let dir = match fs::read_dir(&corpus_dir) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("Failed to read corpus directory: {}", e);
+            std::process::exit(1);
+        }
+    };
 
-        let mut entries: Vec<_> = dir
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .map(|ext| ext == "png")
-                    .unwrap_or(false)
-            })
-            .collect();
+    let mut entries: Vec<_> = dir
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "png")
+                .unwrap_or(false)
+        })
+        .collect();
 
-        entries.sort_by_key(|e| e.path());
+    entries.sort_by_key(|e| e.path());
 
-        for entry in entries.iter().take(5) {
-            let path = entry.path();
-            let filename = path.file_name().unwrap().to_string_lossy();
+    for entry in entries.iter().take(5) {
+        let path = entry.path();
+        let filename = path.file_name().unwrap().to_string_lossy();
 
-            match process_image(&path) {
-                Ok((rust_size, c_size)) => {
-                    let ratio = rust_size as f64 / c_size as f64;
-                    println!("{:<30} Rust: {:>8} C: {:>8} Ratio: {:.3}",
-                        &filename[..filename.len().min(30)],
-                        rust_size, c_size, ratio);
-                    total_rust_bytes += rust_size as u64;
-                    total_c_bytes += c_size as u64;
-                    total_images += 1;
-                }
-                Err(e) => eprintln!("Error: {}: {}", filename, e),
+        match process_image(&path) {
+            Ok((rust_size, c_size)) => {
+                let ratio = rust_size as f64 / c_size as f64;
+                println!(
+                    "{:<30} Rust: {:>8} C: {:>8} Ratio: {:.3}",
+                    &filename[..filename.len().min(30)],
+                    rust_size,
+                    c_size,
+                    ratio
+                );
+                total_rust_bytes += rust_size as u64;
+                total_c_bytes += c_size as u64;
+                total_images += 1;
             }
+            Err(e) => eprintln!("Error: {}: {}", filename, e),
         }
     }
 

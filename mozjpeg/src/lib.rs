@@ -23,6 +23,7 @@ pub mod bitstream;
 pub mod color;
 pub mod consts;
 pub mod dct;
+pub mod deringing;
 pub mod encode;
 pub mod entropy;
 pub mod error;
@@ -38,6 +39,11 @@ pub mod types;
 /// Hidden from public API but available for tests.
 #[doc(hidden)]
 pub mod test_encoder;
+
+/// Corpus utilities for locating test images.
+/// Hidden from public API but available for tests and examples.
+#[doc(hidden)]
+pub mod corpus;
 
 // Re-export commonly used items
 pub use consts::{
@@ -64,7 +70,7 @@ pub use quant::{
     quantize_block, dequantize_block,
 };
 
-pub use dct::{forward_dct_8x8, forward_dct, level_shift};
+pub use dct::{forward_dct_8x8, forward_dct, forward_dct_with_deringing, level_shift};
 
 pub use color::{
     rgb_to_ycbcr, rgb_to_gray, cmyk_to_ycck,
@@ -90,6 +96,8 @@ pub use trellis::{
     trellis_quantize_block, trellis_quantize_block_with_eob_info,
     simple_quantize_block, optimize_eob_runs, BlockEobInfo, compute_block_eob_info,
 };
+
+pub use deringing::preprocess_deringing;
 
 pub use progressive::{
     generate_simple_progressive_scans, generate_standard_progressive_scans,

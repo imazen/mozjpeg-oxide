@@ -56,6 +56,8 @@ pub struct Encoder {
     force_baseline: bool,
     /// Optimize Huffman tables (requires 2-pass)
     optimize_huffman: bool,
+    /// Enable overshoot deringing (reduces ringing on white backgrounds)
+    overshoot_deringing: bool,
 }
 
 impl Default for Encoder {
@@ -74,6 +76,7 @@ impl Encoder {
     /// - Quant tables: ImageMagick (mozjpeg default)
     /// - Trellis: enabled (core mozjpeg optimization)
     /// - Huffman optimization: enabled (2-pass for optimal tables)
+    /// - Overshoot deringing: enabled (reduces ringing on edges)
     pub fn new() -> Self {
         Self {
             quality: 75,
@@ -83,12 +86,14 @@ impl Encoder {
             trellis: TrellisConfig::default(),
             force_baseline: false,
             optimize_huffman: true,
+            overshoot_deringing: true,
         }
     }
 
     /// Create encoder with max compression settings (mozjpeg defaults).
     ///
-    /// Enables progressive mode, trellis quantization, and Huffman optimization.
+    /// Enables progressive mode, trellis quantization, Huffman optimization,
+    /// and overshoot deringing.
     pub fn max_compression() -> Self {
         Self {
             quality: 75,
@@ -98,10 +103,13 @@ impl Encoder {
             trellis: TrellisConfig::default(),
             force_baseline: false,
             optimize_huffman: true,
+            overshoot_deringing: true,
         }
     }
 
     /// Create encoder with fastest settings (libjpeg-turbo compatible).
+    ///
+    /// Disables all mozjpeg optimizations (trellis, Huffman optimization, deringing).
     pub fn fastest() -> Self {
         Self {
             quality: 75,
@@ -111,6 +119,7 @@ impl Encoder {
             trellis: TrellisConfig::disabled(),
             force_baseline: true,
             optimize_huffman: false,
+            overshoot_deringing: false,
         }
     }
 
@@ -155,6 +164,19 @@ impl Encoder {
     /// Enable Huffman table optimization.
     pub fn optimize_huffman(mut self, enable: bool) -> Self {
         self.optimize_huffman = enable;
+        self
+    }
+
+    /// Enable overshoot deringing.
+    ///
+    /// Reduces visible ringing artifacts near hard edges, especially on white
+    /// backgrounds. Works by allowing encoded values to "overshoot" above 255
+    /// (which will clamp back to 255 when decoded) to create smoother waveforms.
+    ///
+    /// This is a mozjpeg-specific feature that can improve visual quality at
+    /// minimal file size cost. Enabled by default.
+    pub fn overshoot_deringing(mut self, enable: bool) -> Self {
+        self.overshoot_deringing = enable;
         self
     }
 
@@ -772,9 +794,13 @@ impl Encoder {
                 .copy_from_slice(&plane[src_offset..src_offset + DCTSIZE]);
         }
 
-        // Forward DCT (includes level shift)
+        // Forward DCT (includes level shift, and optionally overshoot deringing)
         // Note: DCT output is scaled by factor of 8 (sqrt(8) per dimension)
-        dct::forward_dct(&samples, dct_block);
+        if self.overshoot_deringing {
+            dct::forward_dct_with_deringing(&samples, dct_block, qtable[0]);
+        } else {
+            dct::forward_dct(&samples, dct_block);
+        }
 
         // Convert to i32 for quantization
         let mut dct_i32 = [0i32; DCTSIZE2];
@@ -908,9 +934,13 @@ impl Encoder {
                 .copy_from_slice(&plane[src_offset..src_offset + DCTSIZE]);
         }
 
-        // Forward DCT (includes level shift)
+        // Forward DCT (includes level shift, and optionally overshoot deringing)
         // Note: DCT output is scaled by factor of 8 (sqrt(8) per dimension)
-        dct::forward_dct(&samples, dct_block);
+        if self.overshoot_deringing {
+            dct::forward_dct_with_deringing(&samples, dct_block, qtable[0]);
+        } else {
+            dct::forward_dct(&samples, dct_block);
+        }
 
         // Convert to i32 for quantization
         let mut dct_i32 = [0i32; DCTSIZE2];

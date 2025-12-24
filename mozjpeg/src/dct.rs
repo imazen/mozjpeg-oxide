@@ -188,6 +188,31 @@ pub fn forward_dct(samples: &[u8; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
     forward_dct_8x8(&shifted, coeffs);
 }
 
+/// Combined level-shift, overshoot deringing, and forward DCT.
+///
+/// This variant applies mozjpeg's overshoot deringing preprocessing to reduce
+/// visible ringing artifacts near hard edges on white backgrounds.
+///
+/// # Arguments
+/// * `samples` - Input 8x8 block of pixel samples (0-255)
+/// * `coeffs` - Output 8x8 block of DCT coefficients
+/// * `dc_quant` - DC quantization value (used to limit overshoot amount)
+///
+/// # See Also
+/// [`crate::deringing::preprocess_deringing`] for algorithm details.
+pub fn forward_dct_with_deringing(
+    samples: &[u8; DCTSIZE2],
+    coeffs: &mut [i16; DCTSIZE2],
+    dc_quant: u16,
+) {
+    use crate::deringing::preprocess_deringing;
+
+    let mut shifted = [0i16; DCTSIZE2];
+    level_shift(samples, &mut shifted);
+    preprocess_deringing(&mut shifted, dc_quant);
+    forward_dct_8x8(&shifted, coeffs);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

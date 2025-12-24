@@ -387,3 +387,122 @@ fn test_rust_encoder_quality_levels() {
     }
 }
 
+/// Test that Rust deringing matches C deringing.
+///
+/// This test compares the output of preprocess_deringing between Rust and C
+/// implementations to ensure they produce identical results.
+#[test]
+fn test_deringing_matches_c() {
+    use mozjpeg::consts::JPEG_NATURAL_ORDER;
+    use mozjpeg::deringing::preprocess_deringing;
+
+    const MAX_SAMPLE: i16 = 127; // 255 - 128
+
+    // Test case 1: No max pixels (should be unchanged in both)
+    {
+        let mut rust_data = [64i16; 64];
+        let mut c_data = [64i16; 64];
+
+        preprocess_deringing(&mut rust_data, 16);
+        unsafe {
+            ffi::mozjpeg_test_preprocess_deringing(c_data.as_mut_ptr(), 16);
+        }
+
+        assert_eq!(rust_data, c_data, "No max pixels case should match");
+    }
+
+    // Test case 2: All max pixels (should be unchanged in both)
+    {
+        let mut rust_data = [MAX_SAMPLE; 64];
+        let mut c_data = [MAX_SAMPLE; 64];
+
+        preprocess_deringing(&mut rust_data, 16);
+        unsafe {
+            ffi::mozjpeg_test_preprocess_deringing(c_data.as_mut_ptr(), 16);
+        }
+
+        assert_eq!(rust_data, c_data, "All max pixels case should match");
+    }
+
+    // Test case 3: Run of max pixels with surrounding slope
+    {
+        let mut rust_data = [0i16; 64];
+        let mut c_data = [0i16; 64];
+
+        // Set some pixels to max value (indices 10-15 in natural order)
+        for i in 10..16 {
+            rust_data[JPEG_NATURAL_ORDER[i]] = MAX_SAMPLE;
+            c_data[JPEG_NATURAL_ORDER[i]] = MAX_SAMPLE;
+        }
+        // Set surrounding pixels to create a slope
+        rust_data[JPEG_NATURAL_ORDER[8]] = 80;
+        rust_data[JPEG_NATURAL_ORDER[9]] = 100;
+        rust_data[JPEG_NATURAL_ORDER[16]] = 100;
+        rust_data[JPEG_NATURAL_ORDER[17]] = 80;
+
+        c_data[JPEG_NATURAL_ORDER[8]] = 80;
+        c_data[JPEG_NATURAL_ORDER[9]] = 100;
+        c_data[JPEG_NATURAL_ORDER[16]] = 100;
+        c_data[JPEG_NATURAL_ORDER[17]] = 80;
+
+        preprocess_deringing(&mut rust_data, 16);
+        unsafe {
+            ffi::mozjpeg_test_preprocess_deringing(c_data.as_mut_ptr(), 16);
+        }
+
+        // Compare each coefficient
+        let mut max_diff = 0i16;
+        for i in 0..64 {
+            let diff = (rust_data[i] - c_data[i]).abs();
+            max_diff = max_diff.max(diff);
+            // Allow up to 1 difference due to floating point rounding
+            assert!(
+                diff <= 1,
+                "Deringing mismatch at index {} (natural order): Rust={}, C={}, diff={}",
+                i, rust_data[i], c_data[i], diff
+            );
+        }
+
+        println!("Deringing run test max_diff: {}", max_diff);
+    }
+
+    // Test case 4: Different DC quant values
+    for dc_quant in [2u16, 8, 16, 32] {
+        let mut rust_data = [0i16; 64];
+        let mut c_data = [0i16; 64];
+
+        // Create a pattern with max pixels
+        for i in 5..15 {
+            rust_data[JPEG_NATURAL_ORDER[i]] = MAX_SAMPLE;
+            c_data[JPEG_NATURAL_ORDER[i]] = MAX_SAMPLE;
+        }
+        // Surrounding slopes
+        rust_data[JPEG_NATURAL_ORDER[3]] = 50;
+        rust_data[JPEG_NATURAL_ORDER[4]] = 90;
+        rust_data[JPEG_NATURAL_ORDER[15]] = 90;
+        rust_data[JPEG_NATURAL_ORDER[16]] = 50;
+
+        c_data[JPEG_NATURAL_ORDER[3]] = 50;
+        c_data[JPEG_NATURAL_ORDER[4]] = 90;
+        c_data[JPEG_NATURAL_ORDER[15]] = 90;
+        c_data[JPEG_NATURAL_ORDER[16]] = 50;
+
+        preprocess_deringing(&mut rust_data, dc_quant);
+        unsafe {
+            ffi::mozjpeg_test_preprocess_deringing(c_data.as_mut_ptr(), dc_quant);
+        }
+
+        // Compare
+        for i in 0..64 {
+            let diff = (rust_data[i] - c_data[i]).abs();
+            assert!(
+                diff <= 1,
+                "DC quant {} mismatch at {}: Rust={}, C={}, diff={}",
+                dc_quant, i, rust_data[i], c_data[i], diff
+            );
+        }
+    }
+
+    println!("All deringing comparison tests passed!");
+}
+

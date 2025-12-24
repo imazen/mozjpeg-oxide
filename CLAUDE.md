@@ -35,18 +35,21 @@ mode. Use `Encoder::max_compression()` for equivalent behavior.
 
 | Configuration | Rust (ms) | C (ms) | Ratio | Notes |
 |---------------|-----------|--------|-------|-------|
-| Baseline (no opts) | 3.55 | 0.48 | 7.4x slower | C has SIMD DCT |
-| Huffman optimized | 4.24 | 2.10 | 2.0x slower | |
-| Trellis AC | 12.81 | 14.59 | **0.88x faster** | |
-| Trellis AC+DC | 15.18 | 14.49 | ~1.0x same | |
-| Progressive | 4.68 | 11.82 | **0.40x faster** | 2.5x faster! |
-| Max compression | 15.38 | 25.37 | **0.61x faster** | 1.6x faster! |
+| Baseline (no opts) | 3.45 | 0.46 | 7.5x slower | C has SIMD DCT |
+| Huffman optimized | 4.22 | 2.09 | 2.0x slower | |
+| Trellis AC | 12.02 | 13.88 | **0.87x faster** | |
+| Trellis AC+DC | 14.12 | 14.39 | ~1.0x same | |
+| Progressive* | 4.58 | 11.25 | **0.41x faster** | See note below |
+| Max compression* | 14.44 | 24.04 | **0.60x faster** | See note below |
 
 **Key findings:**
 - Baseline encoding is slower due to lack of SIMD (DCT, color conversion)
 - Trellis quantization is competitive or faster
-- Progressive encoding is significantly faster (2.5x)
-- Max compression mode is 1.6x faster than C
+
+**\* Progressive mode note:** C mozjpeg **requires** `optimize_scans=true` for progressive
+encoding to work. This feature tries multiple scan configurations to find the best one.
+Rust doesn't implement `optimize_scans` yet, so C is doing extra work that Rust isn't.
+The progressive comparison isn't fully apples-to-apples.
 
 ### Completed Layers
 - Layer 0: Constants, types, error handling
@@ -93,9 +96,10 @@ let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
 - **Huffman table optimization** - 2-pass encoding for optimal tables
 - **Chroma subsampling** - 4:4:4, 4:2:2, 4:2:0 modes
 - **Quality presets** - `max_compression()` and `fastest()`
+- **Overshoot deringing** - Reduce ringing artifacts at sharp edges (see below)
 
 ### Remaining Work
-- **Overshoot deringing** - Reduce ringing artifacts at sharp edges (mozjpeg feature)
+- **Optimize scans** - Try multiple scan configurations for progressive mode (required by C mozjpeg)
 - **XYB colorspace Huffman optimization** - Perceptual colorspace for better compression
 - EOB optimization integration (`trellis_eob_opt` - disabled by default in C mozjpeg)
 - Arithmetic coding (optional, rarely used)
@@ -172,6 +176,57 @@ The trellis algorithm requires raw DCT coefficients (scaled by 8):
 4. **Distortion**: `(candidate * q - original)^2 * lambda * weight`
 5. **Cost**: `rate + distortion` where rate is Huffman code size + value bits
 
+### Overshoot Deringing
+
+Reduces visible ringing artifacts near hard edges, especially on white backgrounds.
+Source: `jcdctmgr.c:416-550` (~130 lines). Enabled by default with `Encoder::new()`.
+
+**Core Insight:**
+- JPEG can encode values outside the displayable range (0-255)
+- Decoders clamp results to 0-255
+- To encode white (255), any encoded value ≥ 255 works after clamping
+- Hard edges create "square wave" patterns that compress poorly
+- By allowing values to "overshoot" above 255, we get smoother waveforms
+
+**Algorithm (applied BEFORE DCT, after level shift):**
+1. Scan block for pixels at max value (127 after level shift = 255 original)
+2. If no max pixels or all max pixels: return unchanged
+3. Calculate safe overshoot limit:
+   ```
+   maxovershoot = maxsample + min(31, 2*DC_quant, (maxsample*64 - sum)/count)
+   ```
+4. For each run of max-value pixels (in zigzag order):
+   - Calculate slopes from neighboring pixels
+   - Apply Catmull-Rom spline interpolation
+   - Clamp peaks to maxovershoot
+
+**Before (hard edge):**
+```
+Values: 50, 80, 120, 127, 127, 127, 100, 60
+```
+
+**After (smooth curve with overshoot):**
+```
+Values: 50, 80, 120, 135, 140, 138, 100, 60
+                      ↑    ↑    ↑
+              These overshoot 127 but clamp to 255 when decoded
+```
+
+**When it helps:**
+- Images with white backgrounds
+- Text and graphics with hard edges
+- Any image with saturated regions (pixels at 0 or 255)
+
+**API:**
+```rust
+// Enabled by default
+let encoder = Encoder::new();
+
+// Explicitly enable/disable
+let encoder = Encoder::new().overshoot_deringing(true);
+let encoder = Encoder::fastest().overshoot_deringing(false); // fastest disables it
+```
+
 ### Implementation Notes
 1. **Huffman tree construction**: Use sentinel values carefully to avoid overflow
    - `FREQ_INITIAL_MAX = 1_000_000_000` for comparison
@@ -203,6 +258,7 @@ mozjpeg-rs/
 │   │   ├── dct.rs              # Layer 2: Forward DCT (Loeffler)
 │   │   ├── color.rs            # Layer 2: RGB→YCbCr conversion
 │   │   ├── sample.rs           # Layer 2: Chroma subsampling
+│   │   ├── deringing.rs        # Layer 2: Overshoot deringing (pre-DCT)
 │   │   ├── bitstream.rs        # Layer 3: Bit-level I/O
 │   │   ├── entropy.rs          # Layer 4: Huffman encoding
 │   │   ├── trellis.rs          # Layer 4: Trellis quantization
@@ -263,8 +319,37 @@ cargo test --test ffi_comparison    # Run local FFI comparison tests
 cargo test -p mozjpeg-sys-local     # Run local mozjpeg-sys tests
 ```
 
+### Test Corpus
+
+For extended testing with real images:
+
+```bash
+# Fetch Kodak test images (~15MB)
+./scripts/fetch-corpus.sh
+
+# Fetch full corpus including CLIC (~100MB)
+./scripts/fetch-corpus.sh --full
+
+# Or set environment variable to use existing corpus
+export CODEC_CORPUS_DIR=/path/to/codec-corpus
+```
+
+The corpus utilities in `mozjpeg::corpus` handle path resolution:
+- Checks `MOZJPEG_CORPUS_DIR` and `CODEC_CORPUS_DIR` environment variables
+- Falls back to `./corpus/` in project root
+- Bundled test images always available at `mozjpeg/tests/images/`
+
+### CI/CD
+
+GitHub Actions workflow runs on push/PR:
+- Tests on Linux, macOS, Windows
+- Unit tests, codec comparison tests, FFI validation tests
+- Excludes `ffi_comparison` tests (require local mozjpeg C source)
+
 ## Dependencies
 
 - `mozjpeg-sys = "2.2"` (dev) - FFI validation against C mozjpeg
 - `mozjpeg-sys-local` (workspace) - Local FFI with granular test exports
 - `bytemuck = "1.14"` - Safe transmutes (for future SIMD)
+- `dssim`, `ssimulacra2` (dev) - Perceptual quality metrics
+- `codec-eval` (dev) - From https://github.com/imazen/codec-comparison

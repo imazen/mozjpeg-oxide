@@ -1,12 +1,12 @@
 [workspace]
-members = ["mozjpeg", "mozjpeg-sys"]
+members = ["mozjpeg-oxide", "mozjpeg-sys"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "BSD-3-Clause"
-repository = "https://github.com/example/mozjpeg-rs"
+repository = "https://github.com/imazen/mozjpeg-oxide"
 
 [workspace.dependencies]
 # Production

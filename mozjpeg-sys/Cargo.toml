@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Local FFI bindings to mozjpeg with test exports"
 links = "mozjpeg"
+publish = false  # Internal test infrastructure only
 
 [dependencies]
 libc = "0.2"

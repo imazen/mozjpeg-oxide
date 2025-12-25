@@ -9,11 +9,18 @@
 //! Note: The output is scaled up by a factor of 8 compared to a true DCT.
 //! This scaling is removed during quantization (in the encoder pipeline).
 //!
+//! # SIMD Optimization
+//!
+//! The `forward_dct_8x8_simd` function uses the "row-parallel" approach:
+//! process 4 rows simultaneously using `wide::i32x4`. Each lane of the
+//! SIMD vector handles a different row.
+//!
 //! Reference: C. Loeffler, A. Ligtenberg and G. Moschytz,
 //! "Practical Fast 1-D DCT Algorithms with 11 Multiplications",
 //! Proc. ICASSP 1989, pp. 988-991.
 
 use crate::consts::{DCTSIZE, DCTSIZE2};
+use wide::i32x4;
 
 // Fixed-point constants for 13-bit precision (CONST_BITS = 13)
 const CONST_BITS: i32 = 13;
@@ -163,6 +170,256 @@ pub fn forward_dct_8x8(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) 
     }
 }
 
+/// SIMD descale operation for i32x4 vectors.
+#[inline(always)]
+fn descale_simd(x: i32x4, n: i32) -> i32x4 {
+    let round = i32x4::splat(1 << (n - 1));
+    (x + round) >> n
+}
+
+// Pre-computed SIMD constants for DCT - avoid recreating each call
+const SIMD_FIX_0_298631336: i32x4 = i32x4::new([FIX_0_298631336; 4]);
+const SIMD_FIX_0_541196100: i32x4 = i32x4::new([FIX_0_541196100; 4]);
+const SIMD_FIX_0_765366865: i32x4 = i32x4::new([FIX_0_765366865; 4]);
+const SIMD_FIX_1_175875602: i32x4 = i32x4::new([FIX_1_175875602; 4]);
+const SIMD_FIX_1_501321110: i32x4 = i32x4::new([FIX_1_501321110; 4]);
+const SIMD_FIX_1_847759065: i32x4 = i32x4::new([FIX_1_847759065; 4]);
+const SIMD_FIX_2_053119869: i32x4 = i32x4::new([FIX_2_053119869; 4]);
+const SIMD_FIX_3_072711026: i32x4 = i32x4::new([FIX_3_072711026; 4]);
+
+// Negated constants to avoid runtime negation
+const SIMD_NEG_FIX_0_390180644: i32x4 = i32x4::new([-FIX_0_390180644; 4]);
+const SIMD_NEG_FIX_0_899976223: i32x4 = i32x4::new([-FIX_0_899976223; 4]);
+const SIMD_NEG_FIX_1_961570560: i32x4 = i32x4::new([-FIX_1_961570560; 4]);
+const SIMD_NEG_FIX_2_562915447: i32x4 = i32x4::new([-FIX_2_562915447; 4]);
+
+/// Process one batch of 4 rows/columns with 1D DCT.
+/// Fully inlined for performance - no function call overhead.
+#[inline(always)]
+fn dct_1d_simd(
+    d0: i32x4, d1: i32x4, d2: i32x4, d3: i32x4,
+    d4: i32x4, d5: i32x4, d6: i32x4, d7: i32x4,
+    shift_pass1: bool,
+) -> [i32x4; 8] {
+    // Even part
+    let tmp0 = d0 + d7;
+    let tmp7 = d0 - d7;
+    let tmp1 = d1 + d6;
+    let tmp6 = d1 - d6;
+    let tmp2 = d2 + d5;
+    let tmp5 = d2 - d5;
+    let tmp3 = d3 + d4;
+    let tmp4 = d3 - d4;
+
+    let tmp10 = tmp0 + tmp3;
+    let tmp13 = tmp0 - tmp3;
+    let tmp11 = tmp1 + tmp2;
+    let tmp12 = tmp1 - tmp2;
+
+    let (out0, out4) = if shift_pass1 {
+        ((tmp10 + tmp11) << PASS1_BITS, (tmp10 - tmp11) << PASS1_BITS)
+    } else {
+        (
+            descale_simd(tmp10 + tmp11, PASS1_BITS),
+            descale_simd(tmp10 - tmp11, PASS1_BITS),
+        )
+    };
+
+    let z1 = (tmp12 + tmp13) * SIMD_FIX_0_541196100;
+    let (out2, out6) = if shift_pass1 {
+        (
+            descale_simd(z1 + tmp13 * SIMD_FIX_0_765366865, CONST_BITS - PASS1_BITS),
+            descale_simd(z1 - tmp12 * SIMD_FIX_1_847759065, CONST_BITS - PASS1_BITS),
+        )
+    } else {
+        (
+            descale_simd(z1 + tmp13 * SIMD_FIX_0_765366865, CONST_BITS + PASS1_BITS),
+            descale_simd(z1 - tmp12 * SIMD_FIX_1_847759065, CONST_BITS + PASS1_BITS),
+        )
+    };
+
+    // Odd part
+    let z1 = tmp4 + tmp7;
+    let z2 = tmp5 + tmp6;
+    let z3 = tmp4 + tmp6;
+    let z4 = tmp5 + tmp7;
+    let z5 = (z3 + z4) * SIMD_FIX_1_175875602;
+
+    let tmp4 = tmp4 * SIMD_FIX_0_298631336;
+    let tmp5 = tmp5 * SIMD_FIX_2_053119869;
+    let tmp6 = tmp6 * SIMD_FIX_3_072711026;
+    let tmp7 = tmp7 * SIMD_FIX_1_501321110;
+
+    // Use pre-negated constants
+    let neg_z1 = z1 * SIMD_NEG_FIX_0_899976223;
+    let neg_z2 = z2 * SIMD_NEG_FIX_2_562915447;
+    let z3 = z3 * SIMD_NEG_FIX_1_961570560 + z5;
+    let z4 = z4 * SIMD_NEG_FIX_0_390180644 + z5;
+
+    let scale = if shift_pass1 { CONST_BITS - PASS1_BITS } else { CONST_BITS + PASS1_BITS };
+    let out7 = descale_simd(tmp4 + neg_z1 + z3, scale);
+    let out5 = descale_simd(tmp5 + neg_z2 + z4, scale);
+    let out3 = descale_simd(tmp6 + neg_z2 + z3, scale);
+    let out1 = descale_simd(tmp7 + neg_z1 + z4, scale);
+
+    [out0, out1, out2, out3, out4, out5, out6, out7]
+}
+
+/// SIMD-optimized forward DCT on one 8x8 block.
+///
+/// Uses row-parallel approach: processes 4 rows simultaneously using i32x4.
+/// Each lane of the SIMD vector handles a different row.
+///
+/// Optimizations applied:
+/// - Pre-computed SIMD constants (no per-call allocation)
+/// - Pre-negated constants (no runtime negation)
+/// - Inlined 1D DCT helper (no function call overhead)
+/// - Unrolled loops for row/column batches
+pub fn forward_dct_8x8_simd(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
+    // Work buffer - aligned to 64 bytes for potential future SIMD improvements
+    let mut data = [0i32; DCTSIZE2];
+
+    // Convert input to i32 - unrolled for better pipelining
+    // Process 8 values at a time (one row)
+    for row in 0..DCTSIZE {
+        let base = row * DCTSIZE;
+        data[base] = samples[base] as i32;
+        data[base + 1] = samples[base + 1] as i32;
+        data[base + 2] = samples[base + 2] as i32;
+        data[base + 3] = samples[base + 3] as i32;
+        data[base + 4] = samples[base + 4] as i32;
+        data[base + 5] = samples[base + 5] as i32;
+        data[base + 6] = samples[base + 6] as i32;
+        data[base + 7] = samples[base + 7] as i32;
+    }
+
+    // Pass 1: Process rows 0-3
+    {
+        let col0 = i32x4::new([data[0], data[8], data[16], data[24]]);
+        let col1 = i32x4::new([data[1], data[9], data[17], data[25]]);
+        let col2 = i32x4::new([data[2], data[10], data[18], data[26]]);
+        let col3 = i32x4::new([data[3], data[11], data[19], data[27]]);
+        let col4 = i32x4::new([data[4], data[12], data[20], data[28]]);
+        let col5 = i32x4::new([data[5], data[13], data[21], data[29]]);
+        let col6 = i32x4::new([data[6], data[14], data[22], data[30]]);
+        let col7 = i32x4::new([data[7], data[15], data[23], data[31]]);
+
+        let out = dct_1d_simd(col0, col1, col2, col3, col4, col5, col6, col7, true);
+
+        // Scatter results back
+        let arr0 = out[0].to_array(); let arr1 = out[1].to_array();
+        let arr2 = out[2].to_array(); let arr3 = out[3].to_array();
+        let arr4 = out[4].to_array(); let arr5 = out[5].to_array();
+        let arr6 = out[6].to_array(); let arr7 = out[7].to_array();
+
+        data[0] = arr0[0]; data[1] = arr1[0]; data[2] = arr2[0]; data[3] = arr3[0];
+        data[4] = arr4[0]; data[5] = arr5[0]; data[6] = arr6[0]; data[7] = arr7[0];
+        data[8] = arr0[1]; data[9] = arr1[1]; data[10] = arr2[1]; data[11] = arr3[1];
+        data[12] = arr4[1]; data[13] = arr5[1]; data[14] = arr6[1]; data[15] = arr7[1];
+        data[16] = arr0[2]; data[17] = arr1[2]; data[18] = arr2[2]; data[19] = arr3[2];
+        data[20] = arr4[2]; data[21] = arr5[2]; data[22] = arr6[2]; data[23] = arr7[2];
+        data[24] = arr0[3]; data[25] = arr1[3]; data[26] = arr2[3]; data[27] = arr3[3];
+        data[28] = arr4[3]; data[29] = arr5[3]; data[30] = arr6[3]; data[31] = arr7[3];
+    }
+
+    // Pass 1: Process rows 4-7
+    {
+        let col0 = i32x4::new([data[32], data[40], data[48], data[56]]);
+        let col1 = i32x4::new([data[33], data[41], data[49], data[57]]);
+        let col2 = i32x4::new([data[34], data[42], data[50], data[58]]);
+        let col3 = i32x4::new([data[35], data[43], data[51], data[59]]);
+        let col4 = i32x4::new([data[36], data[44], data[52], data[60]]);
+        let col5 = i32x4::new([data[37], data[45], data[53], data[61]]);
+        let col6 = i32x4::new([data[38], data[46], data[54], data[62]]);
+        let col7 = i32x4::new([data[39], data[47], data[55], data[63]]);
+
+        let out = dct_1d_simd(col0, col1, col2, col3, col4, col5, col6, col7, true);
+
+        let arr0 = out[0].to_array(); let arr1 = out[1].to_array();
+        let arr2 = out[2].to_array(); let arr3 = out[3].to_array();
+        let arr4 = out[4].to_array(); let arr5 = out[5].to_array();
+        let arr6 = out[6].to_array(); let arr7 = out[7].to_array();
+
+        data[32] = arr0[0]; data[33] = arr1[0]; data[34] = arr2[0]; data[35] = arr3[0];
+        data[36] = arr4[0]; data[37] = arr5[0]; data[38] = arr6[0]; data[39] = arr7[0];
+        data[40] = arr0[1]; data[41] = arr1[1]; data[42] = arr2[1]; data[43] = arr3[1];
+        data[44] = arr4[1]; data[45] = arr5[1]; data[46] = arr6[1]; data[47] = arr7[1];
+        data[48] = arr0[2]; data[49] = arr1[2]; data[50] = arr2[2]; data[51] = arr3[2];
+        data[52] = arr4[2]; data[53] = arr5[2]; data[54] = arr6[2]; data[55] = arr7[2];
+        data[56] = arr0[3]; data[57] = arr1[3]; data[58] = arr2[3]; data[59] = arr3[3];
+        data[60] = arr4[3]; data[61] = arr5[3]; data[62] = arr6[3]; data[63] = arr7[3];
+    }
+
+    // Pass 2: Process columns 0-3
+    {
+        let row0 = i32x4::new([data[0], data[1], data[2], data[3]]);
+        let row1 = i32x4::new([data[8], data[9], data[10], data[11]]);
+        let row2 = i32x4::new([data[16], data[17], data[18], data[19]]);
+        let row3 = i32x4::new([data[24], data[25], data[26], data[27]]);
+        let row4 = i32x4::new([data[32], data[33], data[34], data[35]]);
+        let row5 = i32x4::new([data[40], data[41], data[42], data[43]]);
+        let row6 = i32x4::new([data[48], data[49], data[50], data[51]]);
+        let row7 = i32x4::new([data[56], data[57], data[58], data[59]]);
+
+        let out = dct_1d_simd(row0, row1, row2, row3, row4, row5, row6, row7, false);
+
+        let arr0 = out[0].to_array(); let arr1 = out[1].to_array();
+        let arr2 = out[2].to_array(); let arr3 = out[3].to_array();
+        let arr4 = out[4].to_array(); let arr5 = out[5].to_array();
+        let arr6 = out[6].to_array(); let arr7 = out[7].to_array();
+
+        data[0] = arr0[0]; data[1] = arr0[1]; data[2] = arr0[2]; data[3] = arr0[3];
+        data[8] = arr1[0]; data[9] = arr1[1]; data[10] = arr1[2]; data[11] = arr1[3];
+        data[16] = arr2[0]; data[17] = arr2[1]; data[18] = arr2[2]; data[19] = arr2[3];
+        data[24] = arr3[0]; data[25] = arr3[1]; data[26] = arr3[2]; data[27] = arr3[3];
+        data[32] = arr4[0]; data[33] = arr4[1]; data[34] = arr4[2]; data[35] = arr4[3];
+        data[40] = arr5[0]; data[41] = arr5[1]; data[42] = arr5[2]; data[43] = arr5[3];
+        data[48] = arr6[0]; data[49] = arr6[1]; data[50] = arr6[2]; data[51] = arr6[3];
+        data[56] = arr7[0]; data[57] = arr7[1]; data[58] = arr7[2]; data[59] = arr7[3];
+    }
+
+    // Pass 2: Process columns 4-7
+    {
+        let row0 = i32x4::new([data[4], data[5], data[6], data[7]]);
+        let row1 = i32x4::new([data[12], data[13], data[14], data[15]]);
+        let row2 = i32x4::new([data[20], data[21], data[22], data[23]]);
+        let row3 = i32x4::new([data[28], data[29], data[30], data[31]]);
+        let row4 = i32x4::new([data[36], data[37], data[38], data[39]]);
+        let row5 = i32x4::new([data[44], data[45], data[46], data[47]]);
+        let row6 = i32x4::new([data[52], data[53], data[54], data[55]]);
+        let row7 = i32x4::new([data[60], data[61], data[62], data[63]]);
+
+        let out = dct_1d_simd(row0, row1, row2, row3, row4, row5, row6, row7, false);
+
+        let arr0 = out[0].to_array(); let arr1 = out[1].to_array();
+        let arr2 = out[2].to_array(); let arr3 = out[3].to_array();
+        let arr4 = out[4].to_array(); let arr5 = out[5].to_array();
+        let arr6 = out[6].to_array(); let arr7 = out[7].to_array();
+
+        data[4] = arr0[0]; data[5] = arr0[1]; data[6] = arr0[2]; data[7] = arr0[3];
+        data[12] = arr1[0]; data[13] = arr1[1]; data[14] = arr1[2]; data[15] = arr1[3];
+        data[20] = arr2[0]; data[21] = arr2[1]; data[22] = arr2[2]; data[23] = arr2[3];
+        data[28] = arr3[0]; data[29] = arr3[1]; data[30] = arr3[2]; data[31] = arr3[3];
+        data[36] = arr4[0]; data[37] = arr4[1]; data[38] = arr4[2]; data[39] = arr4[3];
+        data[44] = arr5[0]; data[45] = arr5[1]; data[46] = arr5[2]; data[47] = arr5[3];
+        data[52] = arr6[0]; data[53] = arr6[1]; data[54] = arr6[2]; data[55] = arr6[3];
+        data[60] = arr7[0]; data[61] = arr7[1]; data[62] = arr7[2]; data[63] = arr7[3];
+    }
+
+    // Copy results to output - unrolled
+    for row in 0..DCTSIZE {
+        let base = row * DCTSIZE;
+        coeffs[base] = data[base] as i16;
+        coeffs[base + 1] = data[base + 1] as i16;
+        coeffs[base + 2] = data[base + 2] as i16;
+        coeffs[base + 3] = data[base + 3] as i16;
+        coeffs[base + 4] = data[base + 4] as i16;
+        coeffs[base + 5] = data[base + 5] as i16;
+        coeffs[base + 6] = data[base + 6] as i16;
+        coeffs[base + 7] = data[base + 7] as i16;
+    }
+}
+
 /// Prepare a sample block for DCT by level-shifting (centering around 0).
 ///
 /// JPEG requires samples to be centered around 0 before DCT.
@@ -179,17 +436,20 @@ pub fn level_shift(samples: &[u8; DCTSIZE2], output: &mut [i16; DCTSIZE2]) {
 
 /// Combined level-shift and forward DCT.
 ///
+/// Uses SIMD-optimized DCT for better performance.
+///
 /// # Arguments
 /// * `samples` - Input 8x8 block of pixel samples (0-255)
 /// * `coeffs` - Output 8x8 block of DCT coefficients
 pub fn forward_dct(samples: &[u8; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
     let mut shifted = [0i16; DCTSIZE2];
     level_shift(samples, &mut shifted);
-    forward_dct_8x8(&shifted, coeffs);
+    forward_dct_8x8_simd(&shifted, coeffs);
 }
 
 /// Combined level-shift, overshoot deringing, and forward DCT.
 ///
+/// Uses SIMD-optimized DCT for better performance.
 /// This variant applies mozjpeg's overshoot deringing preprocessing to reduce
 /// visible ringing artifacts near hard edges on white backgrounds.
 ///
@@ -210,7 +470,7 @@ pub fn forward_dct_with_deringing(
     let mut shifted = [0i16; DCTSIZE2];
     level_shift(samples, &mut shifted);
     preprocess_deringing(&mut shifted, dc_quant);
-    forward_dct_8x8(&shifted, coeffs);
+    forward_dct_8x8_simd(&shifted, coeffs);
 }
 
 #[cfg(test)]
@@ -331,5 +591,77 @@ mod tests {
         assert_eq!(descale(-8, 2), -2);  // (-8+2) >> 2 = -6 >> 2 = -2
         assert_eq!(descale(-9, 2), -2);  // (-9+2) >> 2 = -7 >> 2 = -2
         assert_eq!(descale(-10, 2), -2); // (-10+2) >> 2 = -8 >> 2 = -2
+    }
+
+    #[test]
+    fn test_simd_matches_scalar_flat() {
+        // Test SIMD produces identical output to scalar for flat block
+        let samples = [100i16; DCTSIZE2];
+        let mut coeffs_scalar = [0i16; DCTSIZE2];
+        let mut coeffs_simd = [0i16; DCTSIZE2];
+
+        forward_dct_8x8(&samples, &mut coeffs_scalar);
+        forward_dct_8x8_simd(&samples, &mut coeffs_simd);
+
+        assert_eq!(coeffs_scalar, coeffs_simd, "SIMD should match scalar for flat block");
+    }
+
+    #[test]
+    fn test_simd_matches_scalar_gradient() {
+        // Test SIMD produces identical output to scalar for gradient pattern
+        let mut samples = [0i16; DCTSIZE2];
+        for row in 0..DCTSIZE {
+            for col in 0..DCTSIZE {
+                samples[row * DCTSIZE + col] = ((row as i16 - 4) * 20 + (col as i16 - 4) * 10);
+            }
+        }
+
+        let mut coeffs_scalar = [0i16; DCTSIZE2];
+        let mut coeffs_simd = [0i16; DCTSIZE2];
+
+        forward_dct_8x8(&samples, &mut coeffs_scalar);
+        forward_dct_8x8_simd(&samples, &mut coeffs_simd);
+
+        assert_eq!(coeffs_scalar, coeffs_simd, "SIMD should match scalar for gradient block");
+    }
+
+    #[test]
+    fn test_simd_matches_scalar_random() {
+        // Test SIMD produces identical output to scalar for pseudo-random pattern
+        let mut samples = [0i16; DCTSIZE2];
+        for i in 0..DCTSIZE2 {
+            // Deterministic pseudo-random values in range -128..127
+            samples[i] = ((i as i32 * 73 + 17) % 256 - 128) as i16;
+        }
+
+        let mut coeffs_scalar = [0i16; DCTSIZE2];
+        let mut coeffs_simd = [0i16; DCTSIZE2];
+
+        forward_dct_8x8(&samples, &mut coeffs_scalar);
+        forward_dct_8x8_simd(&samples, &mut coeffs_simd);
+
+        assert_eq!(coeffs_scalar, coeffs_simd, "SIMD should match scalar for random block");
+    }
+
+    #[test]
+    fn test_simd_matches_scalar_all_patterns() {
+        // Exhaustive test with many patterns
+        for seed in 0..20 {
+            let mut samples = [0i16; DCTSIZE2];
+            for i in 0..DCTSIZE2 {
+                samples[i] = ((i as i32 * (seed * 37 + 13) + seed * 7) % 256 - 128) as i16;
+            }
+
+            let mut coeffs_scalar = [0i16; DCTSIZE2];
+            let mut coeffs_simd = [0i16; DCTSIZE2];
+
+            forward_dct_8x8(&samples, &mut coeffs_scalar);
+            forward_dct_8x8_simd(&samples, &mut coeffs_simd);
+
+            assert_eq!(
+                coeffs_scalar, coeffs_simd,
+                "SIMD should match scalar for pattern seed {}", seed
+            );
+        }
     }
 }

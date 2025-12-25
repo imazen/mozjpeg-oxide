@@ -120,84 +120,40 @@ fn bench_encoder_configs(c: &mut Criterion) {
     let rgb = create_test_image(width as usize, height as usize);
 
     let configs = [
-        (
-            "baseline",
-            TestEncoderConfig {
-                quality: 85,
-                subsampling: Subsampling::S420,
-                progressive: false,
-                optimize_huffman: false,
-                trellis_quant: false,
-                trellis_dc: false,
-                overshoot_deringing: false,
-                optimize_scans: false,
-            },
-        ),
+        ("baseline", TestEncoderConfig::baseline()),
         (
             "huffman_opt",
             TestEncoderConfig {
-                quality: 85,
-                subsampling: Subsampling::S420,
-                progressive: false,
                 optimize_huffman: true,
-                trellis_quant: false,
-                trellis_dc: false,
-                overshoot_deringing: false,
-                optimize_scans: false,
+                ..TestEncoderConfig::default()
             },
         ),
         (
             "trellis_ac",
             TestEncoderConfig {
-                quality: 85,
-                subsampling: Subsampling::S420,
-                progressive: false,
                 optimize_huffman: true,
                 trellis_quant: true,
-                trellis_dc: false,
-                overshoot_deringing: false,
-                optimize_scans: false,
+                ..TestEncoderConfig::default()
             },
         ),
         (
             "trellis_ac_dc",
             TestEncoderConfig {
-                quality: 85,
-                subsampling: Subsampling::S420,
-                progressive: false,
                 optimize_huffman: true,
                 trellis_quant: true,
                 trellis_dc: true,
-                overshoot_deringing: false,
-                optimize_scans: false,
+                ..TestEncoderConfig::default()
             },
         ),
         (
             "progressive",
             TestEncoderConfig {
-                quality: 85,
-                subsampling: Subsampling::S420,
                 progressive: true,
                 optimize_huffman: true,
-                trellis_quant: false,
-                trellis_dc: false,
-                overshoot_deringing: false,
-                optimize_scans: false,
+                ..TestEncoderConfig::default()
             },
         ),
-        (
-            "max_compression",
-            TestEncoderConfig {
-                quality: 85,
-                subsampling: Subsampling::S420,
-                progressive: true,
-                optimize_huffman: true,
-                trellis_quant: true,
-                trellis_dc: true,
-                overshoot_deringing: false,
-                optimize_scans: false,
-            },
-        ),
+        ("max_compression", TestEncoderConfig::max_compression()),
     ];
 
     let mut group = c.benchmark_group("rust_configs");
@@ -219,30 +175,14 @@ fn bench_rust_vs_c(c: &mut Criterion) {
     let rgb = create_test_image(width as usize, height as usize);
 
     let configs = [
-        (
-            "baseline",
-            TestEncoderConfig {
-                quality: 85,
-                subsampling: Subsampling::S420,
-                progressive: false,
-                optimize_huffman: false,
-                trellis_quant: false,
-                trellis_dc: false,
-                overshoot_deringing: false,
-                optimize_scans: false,
-            },
-        ),
+        ("baseline", TestEncoderConfig::baseline()),
         (
             "trellis",
             TestEncoderConfig {
-                quality: 85,
-                subsampling: Subsampling::S420,
-                progressive: false,
                 optimize_huffman: true,
                 trellis_quant: true,
                 trellis_dc: true,
-                overshoot_deringing: false,
-                optimize_scans: false,
+                ..TestEncoderConfig::default()
             },
         ),
     ];
@@ -333,11 +273,44 @@ fn bench_subsampling(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark DCT implementations (scalar vs SIMD).
+fn bench_dct(c: &mut Criterion) {
+    use mozjpeg_oxide::dct::{forward_dct_8x8, forward_dct_8x8_simd};
+
+    // Create test data
+    let mut samples = [0i16; 64];
+    for i in 0..64 {
+        samples[i] = ((i as i32 * 73 + 17) % 256 - 128) as i16;
+    }
+
+    let mut group = c.benchmark_group("dct");
+    group.throughput(Throughput::Elements(64)); // 64 coefficients per block
+
+    group.bench_function("scalar", |b| {
+        let mut coeffs = [0i16; 64];
+        b.iter(|| {
+            forward_dct_8x8(black_box(&samples), &mut coeffs);
+            black_box(coeffs)
+        })
+    });
+
+    group.bench_function("simd", |b| {
+        let mut coeffs = [0i16; 64];
+        b.iter(|| {
+            forward_dct_8x8_simd(black_box(&samples), &mut coeffs);
+            black_box(coeffs)
+        })
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_encoder_configs,
     bench_rust_vs_c,
     bench_image_sizes,
-    bench_subsampling
+    bench_subsampling,
+    bench_dct
 );
 criterion_main!(benches);

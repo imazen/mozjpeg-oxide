@@ -51,6 +51,8 @@ mozjpeg-sys = "2.2"
 codec-eval = { git = "https://github.com/imazen/codec-comparison" }
 # Local mozjpeg-sys with granular test exports (for FFI comparison tests)
 sys-local = { path = "crates/sys-local" }
+# Butteraugli perceptual metric from jpegli-rs
+butteraugli = { path = "../jpegli/jpegli-rs/butteraugli" }
 
 [[bench]]
 name = "encode"

@@ -1,7 +1,7 @@
 //! Pareto Front Benchmark: Rust mozjpeg-oxide vs C mozjpeg
 //!
 //! Generates quality vs file size data for Pareto front visualization.
-//! Measures SSIMULACRA2 and DSSIM perceptual quality metrics.
+//! Measures SSIMULACRA2, DSSIM, and Butteraugli perceptual quality metrics.
 //!
 //! Usage:
 //!   cargo run --release --example pareto_benchmark -- [OPTIONS]
@@ -9,10 +9,11 @@
 //! Options:
 //!   --corpus PATH    Path to corpus directory (default: ./corpus)
 //!   --output PATH    Output CSV file (default: benchmark_results.csv)
-//!   --qualities      Comma-separated quality levels (default: 20,30,40,50,60,70,75,80,85,90,95)
+//!   --qualities      Comma-separated quality levels (default: fine-grained 5-95)
 //!   --kodak-only     Only use Kodak corpus
 //!   --clic-only      Only use CLIC corpus
 
+use butteraugli::{compute_butteraugli, ButteraugliParams};
 use mozjpeg_oxide::Encoder;
 use mozjpeg_sys::*;
 use std::fs::{self, File};
@@ -37,6 +38,7 @@ struct EncodingResult {
     bpp: f64, // bits per pixel
     ssimulacra2: f64,
     dssim: f64,
+    butteraugli: f64,
     encode_time_ms: f64,
 }
 
@@ -46,7 +48,10 @@ fn main() {
     // Parse arguments
     let mut corpus_path = PathBuf::from("corpus");
     let mut output_path = PathBuf::from("benchmark_results.csv");
-    let mut qualities: Vec<u8> = vec![20, 30, 40, 50, 60, 70, 75, 80, 85, 90, 95];
+    // Fine-grained quality levels for smooth Pareto curves
+    let mut qualities: Vec<u8> = vec![
+        5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 92, 95, 97,
+    ];
     let mut kodak_only = false;
     let mut clic_only = false;
 
@@ -168,7 +173,8 @@ fn main() {
 
             // Decode Rust JPEG and compute metrics
             let rust_decoded = decode_jpeg(&rust_jpeg);
-            let (rust_ssim2, rust_dssim) = compute_metrics(&rgb, &rust_decoded, width, height);
+            let (rust_ssim2, rust_dssim, rust_butteraugli) =
+                compute_metrics(&rgb, &rust_decoded, width, height);
 
             results.push(EncodingResult {
                 corpus: corpus.clone(),
@@ -179,6 +185,7 @@ fn main() {
                 bpp: (rust_jpeg.len() * 8) as f64 / pixels,
                 ssimulacra2: rust_ssim2,
                 dssim: rust_dssim,
+                butteraugli: rust_butteraugli,
                 encode_time_ms: rust_time,
             });
 
@@ -198,7 +205,8 @@ fn main() {
 
             // Decode C JPEG and compute metrics
             let c_decoded = decode_jpeg(&c_jpeg);
-            let (c_ssim2, c_dssim) = compute_metrics(&rgb, &c_decoded, width, height);
+            let (c_ssim2, c_dssim, c_butteraugli) =
+                compute_metrics(&rgb, &c_decoded, width, height);
 
             results.push(EncodingResult {
                 corpus: corpus.clone(),
@@ -209,6 +217,7 @@ fn main() {
                 bpp: (c_jpeg.len() * 8) as f64 / pixels,
                 ssimulacra2: c_ssim2,
                 dssim: c_dssim,
+                butteraugli: c_butteraugli,
                 encode_time_ms: c_time,
             });
 
@@ -294,6 +303,7 @@ fn encode_rust(rgb: &[u8], width: u32, height: u32, quality: u8) -> Vec<u8> {
         .expect("Rust encoding failed")
 }
 
+#[allow(unsafe_code)]
 fn encode_c(rgb: &[u8], width: u32, height: u32, quality: u8) -> Vec<u8> {
     unsafe {
         let mut cinfo: jpeg_compress_struct = std::mem::zeroed();
@@ -362,7 +372,7 @@ fn decode_jpeg(data: &[u8]) -> Vec<u8> {
     decoder.decode().expect("JPEG decode failed")
 }
 
-fn compute_metrics(original: &[u8], decoded: &[u8], width: u32, height: u32) -> (f64, f64) {
+fn compute_metrics(original: &[u8], decoded: &[u8], width: u32, height: u32) -> (f64, f64, f64) {
     use dssim::Dssim;
     use rgb::RGB8;
 
@@ -436,7 +446,12 @@ fn compute_metrics(original: &[u8], decoded: &[u8], width: u32, height: u32) -> 
 
     let ssim2 = compute_frame_ssimulacra2(orig_ssim, dec_ssim).unwrap_or(0.0);
 
-    (ssim2, dssim_val.into())
+    // Compute Butteraugli
+    let params = ButteraugliParams::default();
+    let butteraugli_result =
+        compute_butteraugli(original, decoded, width as usize, height as usize, &params);
+
+    (ssim2, dssim_val.into(), butteraugli_result.score)
 }
 
 fn write_csv(path: &Path, results: &[EncodingResult]) -> std::io::Result<()> {
@@ -445,13 +460,13 @@ fn write_csv(path: &Path, results: &[EncodingResult]) -> std::io::Result<()> {
     // Header
     writeln!(
         file,
-        "corpus,image,encoder,quality,file_size,bpp,ssimulacra2,dssim,encode_time_ms"
+        "corpus,image,encoder,quality,file_size,bpp,ssimulacra2,dssim,butteraugli,encode_time_ms"
     )?;
 
     for r in results {
         writeln!(
             file,
-            "{},{},{},{},{},{:.6},{:.6},{:.8},{:.3}",
+            "{},{},{},{},{},{:.6},{:.6},{:.8},{:.6},{:.3}",
             r.corpus,
             r.image,
             r.encoder,
@@ -460,6 +475,7 @@ fn write_csv(path: &Path, results: &[EncodingResult]) -> std::io::Result<()> {
             r.bpp,
             r.ssimulacra2,
             r.dssim,
+            r.butteraugli,
             r.encode_time_ms
         )?;
     }
@@ -472,10 +488,10 @@ fn print_summary(results: &[EncodingResult], qualities: &[u8]) {
     println!("========================");
     println!();
     println!(
-        "{:>5} {:>12} {:>12} {:>10} {:>10} {:>12} {:>12}",
-        "Q", "Rust Size", "C Size", "Size Δ%", "SSIM2 Δ", "Rust DSSIM", "C DSSIM"
+        "{:>5} {:>10} {:>10} {:>9} {:>9} {:>10} {:>10}",
+        "Q", "Rust BPP", "C BPP", "Size Δ%", "SSIM2 Δ", "Rust BA", "C BA"
     );
-    println!("{}", "-".repeat(85));
+    println!("{}", "-".repeat(75));
 
     for &q in qualities {
         let rust: Vec<_> = results
@@ -491,25 +507,26 @@ fn print_summary(results: &[EncodingResult], qualities: &[u8]) {
             continue;
         }
 
-        let rust_size: f64 =
-            rust.iter().map(|r| r.file_size as f64).sum::<f64>() / rust.len() as f64;
-        let c_size: f64 = c.iter().map(|r| r.file_size as f64).sum::<f64>() / c.len() as f64;
+        let rust_bpp: f64 = rust.iter().map(|r| r.bpp).sum::<f64>() / rust.len() as f64;
+        let c_bpp: f64 = c.iter().map(|r| r.bpp).sum::<f64>() / c.len() as f64;
         let rust_ssim2: f64 = rust.iter().map(|r| r.ssimulacra2).sum::<f64>() / rust.len() as f64;
         let c_ssim2: f64 = c.iter().map(|r| r.ssimulacra2).sum::<f64>() / c.len() as f64;
-        let rust_dssim: f64 = rust.iter().map(|r| r.dssim).sum::<f64>() / rust.len() as f64;
-        let c_dssim: f64 = c.iter().map(|r| r.dssim).sum::<f64>() / c.len() as f64;
+        let rust_ba: f64 = rust.iter().map(|r| r.butteraugli).sum::<f64>() / rust.len() as f64;
+        let c_ba: f64 = c.iter().map(|r| r.butteraugli).sum::<f64>() / c.len() as f64;
 
-        let size_diff = (rust_size - c_size) / c_size * 100.0;
+        let size_diff = (rust_bpp - c_bpp) / c_bpp * 100.0;
         let ssim2_diff = rust_ssim2 - c_ssim2;
 
         println!(
-            "{:>5} {:>12.0} {:>12.0} {:>+9.2}% {:>+10.4} {:>12.6} {:>12.6}",
-            q, rust_size, c_size, size_diff, ssim2_diff, rust_dssim, c_dssim
+            "{:>5} {:>10.4} {:>10.4} {:>+8.2}% {:>+9.3} {:>10.4} {:>10.4}",
+            q, rust_bpp, c_bpp, size_diff, ssim2_diff, rust_ba, c_ba
         );
     }
 
     println!();
-    println!("Note: Positive Size Δ% means Rust is larger, negative means smaller.");
-    println!("      Positive SSIM2 Δ means Rust has better quality.");
-    println!("      Lower DSSIM is better (0 = identical).");
+    println!("Legend:");
+    println!("  BPP: Bits per pixel (lower = smaller file)");
+    println!("  Size Δ%: Positive = Rust larger, negative = Rust smaller");
+    println!("  SSIM2 Δ: Positive = Rust better quality (SSIMULACRA2 score)");
+    println!("  BA: Butteraugli score (lower = better, <1.0 = imperceptible)");
 }

@@ -99,7 +99,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build documentation
-        run: cargo doc --workspace --no-deps
+        # Exclude sys-local (requires local mozjpeg C source)
+        run: cargo doc -p mozjpeg-oxide --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -114,7 +115,8 @@ jobs:
         uses: dtolnay/rust-toolchain@1.70.0
 
       - name: Build with MSRV
-        run: cargo build --workspace
+        # Only build main crate - dev dependencies may require newer Rust
+        run: cargo build -p mozjpeg-oxide
 
   # Code coverage
   coverage:

@@ -453,8 +453,19 @@ impl Encoder {
             let mut bit_writer = BitWriter::new(output);
             let mut encoder = EntropyEncoder::new(&mut bit_writer);
 
+            // Restart marker support for grayscale (each block = 1 MCU)
+            let restart_interval = self.restart_interval as usize;
+            let mut mcu_count = 0usize;
+            let mut restart_num = 0u8;
+
             for block in &y_blocks {
+                // Emit restart marker if needed
+                if restart_interval > 0 && mcu_count > 0 && mcu_count % restart_interval == 0 {
+                    encoder.emit_restart(restart_num)?;
+                    restart_num = restart_num.wrapping_add(1) & 0x07;
+                }
                 encoder.encode_block(block, 0, &opt_dc_derived, &opt_ac_derived)?;
+                mcu_count += 1;
             }
 
             bit_writer.flush()?;
@@ -471,8 +482,19 @@ impl Encoder {
             let mut dct_block = [0i16; DCTSIZE2];
             let mut quant_block = [0i16; DCTSIZE2];
 
+            // Restart marker support
+            let restart_interval = self.restart_interval as usize;
+            let mut mcu_count = 0usize;
+            let mut restart_num = 0u8;
+
             for mcu_row in 0..mcu_rows {
                 for mcu_col in 0..mcu_cols {
+                    // Emit restart marker if needed
+                    if restart_interval > 0 && mcu_count > 0 && mcu_count % restart_interval == 0 {
+                        encoder.emit_restart(restart_num)?;
+                        restart_num = restart_num.wrapping_add(1) & 0x07;
+                    }
+
                     // Process block directly to quant_block
                     self.process_block_to_storage_with_raw(
                         &y_mcu,
@@ -486,6 +508,7 @@ impl Encoder {
                         None,
                     )?;
                     encoder.encode_block(&quant_block, 0, &dc_luma_derived, &ac_luma_derived)?;
+                    mcu_count += 1;
                 }
             }
 
@@ -1004,11 +1027,21 @@ impl Encoder {
             let mut bit_writer = BitWriter::new(output);
             let mut entropy = EntropyEncoder::new(&mut bit_writer);
 
-            // Encode from stored blocks
+            // Encode from stored blocks with restart marker support
             y_idx = 0;
             c_idx = 0;
+            let restart_interval = self.restart_interval as usize;
+            let mut mcu_count = 0usize;
+            let mut restart_num = 0u8;
+
             for _mcu_row in 0..mcu_rows {
                 for _mcu_col in 0..mcu_cols {
+                    // Emit restart marker if needed (before this MCU, not first)
+                    if restart_interval > 0 && mcu_count > 0 && mcu_count % restart_interval == 0 {
+                        entropy.emit_restart(restart_num)?;
+                        restart_num = restart_num.wrapping_add(1) & 0x07;
+                    }
+
                     // Y blocks
                     for _ in 0..blocks_per_mcu_y {
                         entropy.encode_block(&y_blocks[y_idx], 0, &opt_dc_luma, &opt_ac_luma)?;
@@ -1019,6 +1052,7 @@ impl Encoder {
                     // Cr block
                     entropy.encode_block(&cr_blocks[c_idx], 2, &opt_dc_chroma, &opt_ac_chroma)?;
                     c_idx += 1;
+                    mcu_count += 1;
                 }
             }
 
@@ -1075,12 +1109,25 @@ impl Encoder {
     ) -> Result<()> {
         let mcu_rows = y_height / (DCTSIZE * v_samp as usize);
         let mcu_cols = y_width / (DCTSIZE * h_samp as usize);
+        let total_mcus = mcu_rows * mcu_cols;
 
         let mut dct_block = [0i16; DCTSIZE2];
         let mut quant_block = [0i16; DCTSIZE2];
 
+        // Restart marker tracking
+        let restart_interval = self.restart_interval as usize;
+        let mut mcu_count = 0usize;
+        let mut restart_num = 0u8;
+
         for mcu_row in 0..mcu_rows {
             for mcu_col in 0..mcu_cols {
+                // Check if we need to emit a restart marker BEFORE this MCU
+                // (except for the first MCU)
+                if restart_interval > 0 && mcu_count > 0 && mcu_count % restart_interval == 0 {
+                    entropy.emit_restart(restart_num)?;
+                    restart_num = restart_num.wrapping_add(1) & 0x07;
+                }
+
                 // Encode Y blocks (may be multiple per MCU for subsampling)
                 for v in 0..v_samp as usize {
                     for h in 0..h_samp as usize {
@@ -1123,8 +1170,13 @@ impl Encoder {
                     &mut dct_block,
                     &mut quant_block,
                 )?;
+
+                mcu_count += 1;
             }
         }
+
+        // Suppress unused variable warning
+        let _ = total_mcus;
 
         Ok(())
     }
@@ -2166,17 +2218,29 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_with_dri_marker() {
-        // Test that DRI marker is written when restart_interval is set
-        // Note: Full restart marker support (RST0-RST7 during encoding) is not yet implemented
-        let width = 16u32;
-        let height = 16u32;
-        let rgb_data = vec![128u8; (width * height * 3) as usize];
+    fn test_encode_with_restart_markers() {
+        // Create a larger image to ensure restart markers are emitted
+        let width = 64u32;
+        let height = 64u32;
+        let mut rgb_data = vec![0u8; (width * height * 3) as usize];
 
-        // Set restart interval
+        // Create a pattern
+        for y in 0..height {
+            for x in 0..width {
+                let i = (y * width + x) as usize;
+                rgb_data[i * 3] = (x * 4) as u8;
+                rgb_data[i * 3 + 1] = (y * 4) as u8;
+                rgb_data[i * 3 + 2] = 128;
+            }
+        }
+
+        // Set restart interval (every 4 MCUs)
         let encoder = Encoder::new()
             .quality(75)
-            .restart_interval(8);
+            .subsampling(Subsampling::S444) // 1x1, so 64 MCUs for 64x64 image
+            .optimize_huffman(false) // Use streaming path
+            .trellis(TrellisConfig::disabled())
+            .restart_interval(4);
 
         let jpeg_data = encoder.encode_rgb(&rgb_data, width, height).unwrap();
 
@@ -2190,18 +2254,28 @@ mod tests {
                     let len = ((jpeg_data[i + 2] as u16) << 8) | (jpeg_data[i + 3] as u16);
                     assert_eq!(len, 4, "DRI marker length should be 4");
                     let interval = ((jpeg_data[i + 4] as u16) << 8) | (jpeg_data[i + 5] as u16);
-                    assert_eq!(interval, 8, "Restart interval should be 8");
+                    assert_eq!(interval, 4, "Restart interval should be 4");
                 }
                 break;
             }
         }
         assert!(found_dri, "DRI marker not found in output");
 
-        // Verify JPEG structure is valid (markers present)
-        assert_eq!(jpeg_data[0], 0xFF);
-        assert_eq!(jpeg_data[1], 0xD8); // SOI
-        assert_eq!(jpeg_data[jpeg_data.len() - 2], 0xFF);
-        assert_eq!(jpeg_data[jpeg_data.len() - 1], 0xD9); // EOI
+        // Check for RST markers (0xFFD0-0xFFD7) in the entropy data
+        // With 64 MCUs and interval=4, we should have 15 RST markers (after MCUs 4,8,12,...60)
+        let mut rst_count = 0;
+        for i in 0..jpeg_data.len() - 1 {
+            if jpeg_data[i] == 0xFF && jpeg_data[i + 1] >= 0xD0 && jpeg_data[i + 1] <= 0xD7 {
+                rst_count += 1;
+            }
+        }
+        // 64 MCUs / 4 = 16 groups, so 15 restart markers between them
+        assert_eq!(rst_count, 15, "Expected 15 RST markers, found {}", rst_count);
+
+        // Should be decodable
+        let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&jpeg_data));
+        let decoded = decoder.decode().expect("Failed to decode JPEG with restart markers");
+        assert_eq!(decoded.len(), (width * height * 3) as usize);
     }
 
     #[test]

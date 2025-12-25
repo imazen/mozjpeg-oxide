@@ -69,6 +69,27 @@ impl<'a, W: Write> EntropyEncoder<'a, W> {
         self.last_dc_val = [0; 4];
     }
 
+    /// Emit a restart marker and reset DC predictions.
+    ///
+    /// This flushes the bit buffer (padding with 1-bits to byte boundary),
+    /// writes the RST marker (0xFFD0 + restart_num), and resets DC predictions.
+    ///
+    /// # Arguments
+    /// * `restart_num` - Restart marker number (0-7, will be masked to 3 bits)
+    pub fn emit_restart(&mut self, restart_num: u8) -> std::io::Result<()> {
+        // Flush bit buffer (pads with 1-bits to byte boundary)
+        self.writer.flush()?;
+
+        // Write RST marker: 0xFF followed by 0xD0 + (restart_num % 8)
+        let rst_marker = 0xD0 + (restart_num & 0x07);
+        self.writer.write_bytes(&[0xFF, rst_marker])?;
+
+        // Reset DC predictions
+        self.reset_dc();
+
+        Ok(())
+    }
+
     /// Get the last DC value for a component.
     pub fn last_dc(&self, component: usize) -> i16 {
         self.last_dc_val[component]

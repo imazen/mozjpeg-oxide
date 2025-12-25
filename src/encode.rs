@@ -448,7 +448,10 @@ impl Encoder {
 
             for (mcu_count, block) in y_blocks.iter().enumerate() {
                 // Emit restart marker if needed
-                if restart_interval > 0 && mcu_count > 0 && mcu_count % restart_interval == 0 {
+                if restart_interval > 0
+                    && mcu_count > 0
+                    && mcu_count.is_multiple_of(restart_interval)
+                {
                     encoder.emit_restart(restart_num)?;
                     restart_num = restart_num.wrapping_add(1) & 0x07;
                 }
@@ -477,7 +480,10 @@ impl Encoder {
             for mcu_row in 0..mcu_rows {
                 for mcu_col in 0..mcu_cols {
                     // Emit restart marker if needed
-                    if restart_interval > 0 && mcu_count > 0 && mcu_count % restart_interval == 0 {
+                    if restart_interval > 0
+                        && mcu_count > 0
+                        && mcu_count.is_multiple_of(restart_interval)
+                    {
                         encoder.emit_restart(restart_num)?;
                         restart_num = restart_num.wrapping_add(1) & 0x07;
                     }
@@ -849,14 +855,11 @@ impl Encoder {
                         };
                         // Calculate actual block dimensions for this component
                         let (actual_block_cols, actual_block_rows) = if comp_idx == 0 {
-                            (
-                                (width + DCTSIZE - 1) / DCTSIZE,
-                                (height + DCTSIZE - 1) / DCTSIZE,
-                            )
+                            (width.div_ceil(DCTSIZE), height.div_ceil(DCTSIZE))
                         } else {
                             (
-                                (chroma_width + DCTSIZE - 1) / DCTSIZE,
-                                (chroma_height + DCTSIZE - 1) / DCTSIZE,
+                                chroma_width.div_ceil(DCTSIZE),
+                                chroma_height.div_ceil(DCTSIZE),
                             )
                         };
                         self.count_ac_scan_symbols(
@@ -1159,7 +1162,10 @@ impl Encoder {
             for _mcu_row in 0..mcu_rows {
                 for _mcu_col in 0..mcu_cols {
                     // Emit restart marker if needed (before this MCU, not first)
-                    if restart_interval > 0 && mcu_count > 0 && mcu_count % restart_interval == 0 {
+                    if restart_interval > 0
+                        && mcu_count > 0
+                        && mcu_count.is_multiple_of(restart_interval)
+                    {
                         entropy.emit_restart(restart_num)?;
                         restart_num = restart_num.wrapping_add(1) & 0x07;
                     }
@@ -1259,7 +1265,10 @@ impl Encoder {
             for mcu_col in 0..mcu_cols {
                 // Check if we need to emit a restart marker BEFORE this MCU
                 // (except for the first MCU)
-                if restart_interval > 0 && mcu_count > 0 && mcu_count % restart_interval == 0 {
+                if restart_interval > 0
+                    && mcu_count > 0
+                    && mcu_count.is_multiple_of(restart_interval)
+                {
                     entropy.emit_restart(restart_num)?;
                     restart_num = restart_num.wrapping_add(1) & 0x07;
                 }
@@ -1721,14 +1730,14 @@ impl Encoder {
             let (actual_block_cols, actual_block_rows) = if comp_idx == 0 {
                 // Y component: full resolution
                 (
-                    (actual_width + DCTSIZE - 1) / DCTSIZE,
-                    (actual_height + DCTSIZE - 1) / DCTSIZE,
+                    actual_width.div_ceil(DCTSIZE),
+                    actual_height.div_ceil(DCTSIZE),
                 )
             } else {
                 // Chroma components: subsampled resolution
                 (
-                    (chroma_width + DCTSIZE - 1) / DCTSIZE,
-                    (chroma_height + DCTSIZE - 1) / DCTSIZE,
+                    chroma_width.div_ceil(DCTSIZE),
+                    chroma_height.div_ceil(DCTSIZE),
                 )
             };
 

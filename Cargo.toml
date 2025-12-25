@@ -2,7 +2,7 @@
 name = "mozjpeg-oxide"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85.0"
+rust-version = "1.89.0"
 license = "BSD-3-Clause"
 repository = "https://github.com/imazen/mozjpeg-oxide"
 description = "Pure Rust JPEG encoder based on Mozilla's mozjpeg with trellis quantization"

@@ -25,7 +25,7 @@ use crate::consts::DCTSIZE;
 /// # Panics
 /// Panics if output length is not input.len() / 2 (rounded up).
 pub fn downsample_h2v1_row(input: &[u8], output: &mut [u8]) {
-    let output_len = (input.len() + 1) / 2;
+    let output_len = input.len().div_ceil(2);
     assert!(output.len() >= output_len, "output buffer too small");
 
     let mut bias = 0u16;
@@ -56,7 +56,7 @@ pub fn downsample_h2v1_row(input: &[u8], output: &mut [u8]) {
 /// Panics if rows have different lengths or output is too small.
 pub fn downsample_h2v2_rows(row0: &[u8], row1: &[u8], output: &mut [u8]) {
     assert_eq!(row0.len(), row1.len(), "input rows must have same length");
-    let output_len = (row0.len() + 1) / 2;
+    let output_len = row0.len().div_ceil(2);
     assert!(output.len() >= output_len, "output buffer too small");
 
     let mut bias = 1u16;
@@ -99,8 +99,8 @@ pub fn downsample_plane(
     assert!(h_ratio == 1 || h_ratio == 2, "h_ratio must be 1 or 2");
     assert!(v_ratio == 1 || v_ratio == 2, "v_ratio must be 1 or 2");
 
-    let output_width = (input_width + h_ratio - 1) / h_ratio;
-    let output_height = (input_height + v_ratio - 1) / v_ratio;
+    let output_width = input_width.div_ceil(h_ratio);
+    let output_height = input_height.div_ceil(v_ratio);
 
     assert!(
         output.len() >= output_width * output_height,
@@ -175,10 +175,7 @@ pub fn subsampled_dimensions(
     h_ratio: usize,
     v_ratio: usize,
 ) -> (usize, usize) {
-    (
-        (width + h_ratio - 1) / h_ratio,
-        (height + v_ratio - 1) / v_ratio,
-    )
+    (width.div_ceil(h_ratio), height.div_ceil(v_ratio))
 }
 
 /// Calculate MCU-aligned dimensions for encoding.
@@ -194,8 +191,8 @@ pub fn mcu_aligned_dimensions(
     let h_mcu = DCTSIZE * max_h_samp;
     let v_mcu = DCTSIZE * max_v_samp;
     (
-        (width + h_mcu - 1) / h_mcu * h_mcu,
-        (height + v_mcu - 1) / v_mcu * v_mcu,
+        width.div_ceil(h_mcu) * h_mcu,
+        height.div_ceil(v_mcu) * v_mcu,
     )
 }
 

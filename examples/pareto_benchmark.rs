@@ -11,6 +11,7 @@
 //!   --qualities      Comma-separated quality levels (default: fine-grained 5-95)
 //!   --kodak-only     Only use Kodak corpus
 //!   --clic-only      Only use CLIC corpus
+//!   --xyb-roundtrip  Enable XYB roundtrip for fair comparison (isolates compression error)
 
 use codec_eval::{EvalConfig, EvalSession, ImageData, MetricConfig, ViewingCondition};
 use mozjpeg_oxide::Encoder;
@@ -47,6 +48,7 @@ fn main() {
     ];
     let mut kodak_only = false;
     let mut clic_only = false;
+    let mut xyb_roundtrip = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -68,6 +70,7 @@ fn main() {
             }
             "--kodak-only" => kodak_only = true,
             "--clic-only" => clic_only = true,
+            "--xyb-roundtrip" => xyb_roundtrip = true,
             "--help" | "-h" => {
                 print_usage();
                 return;
@@ -135,13 +138,22 @@ fn main() {
         "Total configurations: {}",
         images.len() * qualities.len() * 2
     );
+    if xyb_roundtrip {
+        println!("XYB roundtrip: ENABLED (isolating compression error from color space error)");
+    }
     println!();
 
     // Create codec-eval session with perceptual metrics
+    let metrics = if xyb_roundtrip {
+        MetricConfig::perceptual_xyb() // Perceptual metrics with XYB roundtrip
+    } else {
+        MetricConfig::perceptual() // DSSIM, SSIMULACRA2, Butteraugli
+    };
+
     let config = EvalConfig::builder()
         .report_dir("./benchmark")
         .viewing(ViewingCondition::desktop())
-        .metrics(MetricConfig::perceptual()) // DSSIM, SSIMULACRA2, Butteraugli
+        .metrics(metrics)
         .quality_levels(qualities.iter().map(|&q| q as f64).collect())
         .build();
 
@@ -281,6 +293,7 @@ fn print_usage() {
     println!("  --qualities Q    Comma-separated quality levels");
     println!("  --kodak-only     Only use Kodak corpus");
     println!("  --clic-only      Only use CLIC corpus");
+    println!("  --xyb-roundtrip  Enable XYB roundtrip (isolates compression error)");
     println!("  --help, -h       Show this help");
 }
 

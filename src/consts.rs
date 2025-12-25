@@ -30,6 +30,8 @@ pub const JPEG_SOS: u8 = 0xDA;
 pub const JPEG_RST0: u8 = 0xD0;
 /// APP0 marker (JFIF)
 pub const JPEG_APP0: u8 = 0xE0;
+/// APP1 marker (EXIF)
+pub const JPEG_APP1: u8 = 0xE1;
 /// APP14 marker (Adobe)
 pub const JPEG_APP14: u8 = 0xEE;
 /// Comment marker

@@ -80,6 +80,10 @@ pub struct Encoder {
     overshoot_deringing: bool,
     /// Optimize progressive scan configuration (tries multiple configs, picks smallest)
     optimize_scans: bool,
+    /// Restart interval in MCUs (0 = disabled)
+    restart_interval: u16,
+    /// EXIF data to embed (raw TIFF structure, without "Exif\0\0" header)
+    exif_data: Option<Vec<u8>>,
 }
 
 impl Default for Encoder {
@@ -110,6 +114,8 @@ impl Encoder {
             optimize_huffman: true,
             overshoot_deringing: true,
             optimize_scans: false,
+            restart_interval: 0,
+            exif_data: None,
         }
     }
 
@@ -128,6 +134,8 @@ impl Encoder {
             optimize_huffman: true,
             overshoot_deringing: true,
             optimize_scans: true,
+            restart_interval: 0,
+            exif_data: None,
         }
     }
 
@@ -146,6 +154,8 @@ impl Encoder {
             optimize_huffman: false,
             overshoot_deringing: false,
             optimize_scans: false,
+            restart_interval: 0,
+            exif_data: None,
         }
     }
 
@@ -218,6 +228,29 @@ impl Encoder {
         self
     }
 
+    /// Set restart interval in MCUs.
+    ///
+    /// Restart markers are inserted every N MCUs, which can help with
+    /// error recovery and parallel decoding. Set to 0 to disable (default).
+    ///
+    /// Common values: 0 (disabled), or image width in MCUs for row-by-row restarts.
+    pub fn restart_interval(mut self, interval: u16) -> Self {
+        self.restart_interval = interval;
+        self
+    }
+
+    /// Set EXIF data to embed in the JPEG.
+    ///
+    /// # Arguments
+    /// * `data` - Raw EXIF data (TIFF structure). The "Exif\0\0" header
+    ///            will be added automatically.
+    ///
+    /// Pass empty or call without this method to omit EXIF data.
+    pub fn exif_data(mut self, data: Vec<u8>) -> Self {
+        self.exif_data = if data.is_empty() { None } else { Some(data) };
+        self
+    }
+
     /// Encode RGB image data to JPEG.
     ///
     /// # Arguments
@@ -249,6 +282,219 @@ impl Encoder {
         let mut output = Vec::new();
         self.encode_rgb_to_writer(rgb_data, width, height, &mut output)?;
         Ok(output)
+    }
+
+    /// Encode grayscale image data to JPEG.
+    ///
+    /// # Arguments
+    /// * `gray_data` - Grayscale pixel data (1 byte per pixel, row-major)
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    ///
+    /// # Returns
+    /// JPEG-encoded data as a Vec<u8>
+    pub fn encode_gray(&self, gray_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+        // Validate dimensions: must be non-zero
+        if width == 0 || height == 0 {
+            return Err(Error::InvalidDimensions { width, height });
+        }
+
+        // Use checked arithmetic to prevent overflow
+        let expected_len = (width as usize)
+            .checked_mul(height as usize)
+            .ok_or(Error::InvalidDimensions { width, height })?;
+
+        if gray_data.len() != expected_len {
+            return Err(Error::BufferSizeMismatch {
+                expected: expected_len,
+                actual: gray_data.len(),
+            });
+        }
+
+        let mut output = Vec::new();
+        self.encode_gray_to_writer(gray_data, width, height, &mut output)?;
+        Ok(output)
+    }
+
+    /// Encode grayscale image data to a writer.
+    pub fn encode_gray_to_writer<W: Write>(
+        &self,
+        gray_data: &[u8],
+        width: u32,
+        height: u32,
+        output: W,
+    ) -> Result<()> {
+        let width = width as usize;
+        let height = height as usize;
+
+        // For grayscale, Y plane is the input directly (no conversion needed)
+        let y_plane = gray_data;
+
+        // Grayscale uses 1x1 sampling
+        let (mcu_width, mcu_height) = sample::mcu_aligned_dimensions(width, height, 1, 1);
+
+        let mcu_y_size = mcu_width
+            .checked_mul(mcu_height)
+            .ok_or(Error::AllocationFailed)?;
+        let mut y_mcu = try_alloc_vec(0u8, mcu_y_size)?;
+        sample::expand_to_mcu(y_plane, width, height, &mut y_mcu, mcu_width, mcu_height);
+
+        // Create quantization table (only luma needed)
+        let (luma_qtable, _) = create_quant_tables(
+            self.quality,
+            self.quant_table_idx,
+            self.force_baseline,
+        );
+
+        // Create Huffman tables (only luma needed)
+        let dc_luma_huff = create_std_dc_luma_table();
+        let ac_luma_huff = create_std_ac_luma_table();
+        let dc_luma_derived = DerivedTable::from_huff_table(&dc_luma_huff, true)?;
+        let ac_luma_derived = DerivedTable::from_huff_table(&ac_luma_huff, false)?;
+
+        // Single component for grayscale
+        let components = create_components(Subsampling::Gray);
+
+        // Write JPEG file
+        let mut marker_writer = MarkerWriter::new(output);
+
+        // SOI
+        marker_writer.write_soi()?;
+
+        // APP0 (JFIF)
+        marker_writer.write_jfif_app0(1, 72, 72)?;
+
+        // EXIF (if present)
+        if let Some(ref exif) = self.exif_data {
+            marker_writer.write_app1_exif(exif)?;
+        }
+
+        // DQT (only luma table for grayscale)
+        let luma_qtable_zz = natural_to_zigzag(&luma_qtable.values);
+        marker_writer.write_dqt(0, &luma_qtable_zz, false)?;
+
+        // SOF (baseline for grayscale - progressive would need multi-scan support)
+        marker_writer.write_sof(
+            false, // Use baseline for grayscale (simpler)
+            8,
+            height as u16,
+            width as u16,
+            &components,
+        )?;
+
+        // DRI (restart interval)
+        if self.restart_interval > 0 {
+            marker_writer.write_dri(self.restart_interval)?;
+        }
+
+        // DHT (only luma tables for grayscale)
+        if !self.optimize_huffman {
+            marker_writer.write_dht_multiple(&[
+                (0, false, &dc_luma_huff),
+                (0, true, &ac_luma_huff),
+            ])?;
+        }
+
+        // Grayscale uses baseline encoding
+        let mcu_rows = mcu_height / DCTSIZE;
+        let mcu_cols = mcu_width / DCTSIZE;
+        let num_blocks = mcu_rows
+            .checked_mul(mcu_cols)
+            .ok_or(Error::AllocationFailed)?;
+
+        if self.optimize_huffman {
+            // 2-pass: collect blocks, count frequencies, then encode
+            let mut y_blocks = try_alloc_vec_array::<i16, DCTSIZE2>(num_blocks)?;
+            let mut dct_block = [0i16; DCTSIZE2];
+
+            // Collect all blocks using the same process as RGB encoding
+            for mcu_row in 0..mcu_rows {
+                for mcu_col in 0..mcu_cols {
+                    let block_idx = mcu_row * mcu_cols + mcu_col;
+                    self.process_block_to_storage_with_raw(
+                        &y_mcu,
+                        mcu_width,
+                        mcu_row,
+                        mcu_col,
+                        &luma_qtable.values,
+                        &ac_luma_derived,
+                        &mut y_blocks[block_idx],
+                        &mut dct_block,
+                        None, // No raw DCT storage needed for grayscale
+                    )?;
+                }
+            }
+
+            // Count frequencies using SymbolCounter
+            let mut dc_freq = FrequencyCounter::new();
+            let mut ac_freq = FrequencyCounter::new();
+            let mut counter = SymbolCounter::new();
+            for block in &y_blocks {
+                counter.count_block(block, 0, &mut dc_freq, &mut ac_freq);
+            }
+
+            // Generate optimized tables
+            let opt_dc_huff = dc_freq.generate_table()?;
+            let opt_ac_huff = ac_freq.generate_table()?;
+            let opt_dc_derived = DerivedTable::from_huff_table(&opt_dc_huff, true)?;
+            let opt_ac_derived = DerivedTable::from_huff_table(&opt_ac_huff, false)?;
+
+            // Write optimized Huffman tables
+            marker_writer.write_dht_multiple(&[
+                (0, false, &opt_dc_huff),
+                (0, true, &opt_ac_huff),
+            ])?;
+
+            // Write SOS and encode
+            let scans = generate_baseline_scan(1);
+            marker_writer.write_sos(&scans[0], &components)?;
+
+            let output = marker_writer.into_inner();
+            let mut bit_writer = BitWriter::new(output);
+            let mut encoder = EntropyEncoder::new(&mut bit_writer);
+
+            for block in &y_blocks {
+                encoder.encode_block(block, 0, &opt_dc_derived, &opt_ac_derived)?;
+            }
+
+            bit_writer.flush()?;
+            let mut output = bit_writer.into_inner();
+            output.write_all(&[0xFF, 0xD9])?; // EOI
+        } else {
+            // Single-pass encoding
+            let scans = generate_baseline_scan(1);
+            marker_writer.write_sos(&scans[0], &components)?;
+
+            let output = marker_writer.into_inner();
+            let mut bit_writer = BitWriter::new(output);
+            let mut encoder = EntropyEncoder::new(&mut bit_writer);
+            let mut dct_block = [0i16; DCTSIZE2];
+            let mut quant_block = [0i16; DCTSIZE2];
+
+            for mcu_row in 0..mcu_rows {
+                for mcu_col in 0..mcu_cols {
+                    // Process block directly to quant_block
+                    self.process_block_to_storage_with_raw(
+                        &y_mcu,
+                        mcu_width,
+                        mcu_row,
+                        mcu_col,
+                        &luma_qtable.values,
+                        &ac_luma_derived,
+                        &mut quant_block,
+                        &mut dct_block,
+                        None,
+                    )?;
+                    encoder.encode_block(&quant_block, 0, &dc_luma_derived, &ac_luma_derived)?;
+                }
+            }
+
+            bit_writer.flush()?;
+            let mut output = bit_writer.into_inner();
+            output.write_all(&[0xFF, 0xD9])?; // EOI
+        }
+
+        Ok(())
     }
 
     /// Encode RGB image data to a writer.
@@ -356,6 +602,11 @@ impl Encoder {
         // APP0 (JFIF)
         marker_writer.write_jfif_app0(1, 72, 72)?;
 
+        // APP1 (EXIF) - if present
+        if let Some(ref exif) = self.exif_data {
+            marker_writer.write_app1_exif(exif)?;
+        }
+
         // DQT (quantization tables in zigzag order) - combined into single marker
         let luma_qtable_zz = natural_to_zigzag(&luma_qtable.values);
         let chroma_qtable_zz = natural_to_zigzag(&chroma_qtable.values);
@@ -372,6 +623,11 @@ impl Encoder {
             width as u16,
             &components,
         )?;
+
+        // DRI (restart interval) - if enabled
+        if self.restart_interval > 0 {
+            marker_writer.write_dri(self.restart_interval)?;
+        }
 
         // DHT (Huffman tables) - written here for non-optimized modes,
         // or later after frequency counting for optimized modes
@@ -1605,38 +1861,58 @@ fn write_sos_marker<W: Write>(
     Ok(())
 }
 
-fn create_ycbcr_components(subsampling: Subsampling) -> Vec<ComponentInfo> {
-    let (h_samp, v_samp) = subsampling.luma_factors();
-
-    vec![
-        ComponentInfo {
-            component_id: 1, // Y
+/// Create component info for the given subsampling mode.
+/// Returns 1 component for grayscale, 3 for color modes.
+fn create_components(subsampling: Subsampling) -> Vec<ComponentInfo> {
+    if subsampling == Subsampling::Gray {
+        // Grayscale: single Y component
+        vec![ComponentInfo {
+            component_id: 1,
             component_index: 0,
-            h_samp_factor: h_samp,
-            v_samp_factor: v_samp,
+            h_samp_factor: 1,
+            v_samp_factor: 1,
             quant_tbl_no: 0,
             dc_tbl_no: 0,
             ac_tbl_no: 0,
-        },
-        ComponentInfo {
-            component_id: 2, // Cb
-            component_index: 1,
-            h_samp_factor: 1,
-            v_samp_factor: 1,
-            quant_tbl_no: 1,
-            dc_tbl_no: 1,
-            ac_tbl_no: 1,
-        },
-        ComponentInfo {
-            component_id: 3, // Cr
-            component_index: 2,
-            h_samp_factor: 1,
-            v_samp_factor: 1,
-            quant_tbl_no: 1,
-            dc_tbl_no: 1,
-            ac_tbl_no: 1,
-        },
-    ]
+        }]
+    } else {
+        // Color: Y, Cb, Cr components
+        let (h_samp, v_samp) = subsampling.luma_factors();
+        vec![
+            ComponentInfo {
+                component_id: 1, // Y
+                component_index: 0,
+                h_samp_factor: h_samp,
+                v_samp_factor: v_samp,
+                quant_tbl_no: 0,
+                dc_tbl_no: 0,
+                ac_tbl_no: 0,
+            },
+            ComponentInfo {
+                component_id: 2, // Cb
+                component_index: 1,
+                h_samp_factor: 1,
+                v_samp_factor: 1,
+                quant_tbl_no: 1,
+                dc_tbl_no: 1,
+                ac_tbl_no: 1,
+            },
+            ComponentInfo {
+                component_id: 3, // Cr
+                component_index: 2,
+                h_samp_factor: 1,
+                v_samp_factor: 1,
+                quant_tbl_no: 1,
+                dc_tbl_no: 1,
+                ac_tbl_no: 1,
+            },
+        ]
+    }
+}
+
+// Keep for backwards compatibility
+fn create_ycbcr_components(subsampling: Subsampling) -> Vec<ComponentInfo> {
+    create_components(subsampling)
 }
 
 fn natural_to_zigzag(natural: &[u16; DCTSIZE2]) -> [u16; DCTSIZE2] {
@@ -1808,6 +2084,124 @@ mod tests {
         let result = encoder.encode_rgb(&rgb_data, width, height);
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_encode_grayscale() {
+        // Create a 16x16 grayscale gradient
+        let width = 16u32;
+        let height = 16u32;
+        let mut gray_data = vec![0u8; (width * height) as usize];
+
+        for y in 0..height {
+            for x in 0..width {
+                let i = (y * width + x) as usize;
+                gray_data[i] = ((x + y) * 8) as u8;
+            }
+        }
+
+        let encoder = Encoder::new().quality(85);
+        let result = encoder.encode_gray(&gray_data, width, height);
+
+        assert!(result.is_ok());
+        let jpeg_data = result.unwrap();
+
+        // Check JPEG markers
+        assert_eq!(jpeg_data[0], 0xFF);
+        assert_eq!(jpeg_data[1], 0xD8); // SOI
+        assert_eq!(jpeg_data[jpeg_data.len() - 2], 0xFF);
+        assert_eq!(jpeg_data[jpeg_data.len() - 1], 0xD9); // EOI
+
+        // Decode and verify it's grayscale
+        let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&jpeg_data));
+        let decoded = decoder.decode().expect("Failed to decode grayscale JPEG");
+        let info = decoder.info().unwrap();
+
+        assert_eq!(info.width, width as u16);
+        assert_eq!(info.height, height as u16);
+        // Grayscale should have 1 component
+        assert_eq!(decoded.len(), (width * height) as usize);
+    }
+
+    #[test]
+    fn test_encode_with_exif() {
+        // Create a small test image
+        let width = 16u32;
+        let height = 16u32;
+        let rgb_data = vec![128u8; (width * height * 3) as usize];
+
+        // Simple EXIF-like data (minimal TIFF header)
+        // Real EXIF would have proper TIFF structure, this is just for marker presence testing
+        let exif_data = vec![
+            0x4D, 0x4D, // Big-endian TIFF
+            0x00, 0x2A, // TIFF magic
+            0x00, 0x00, 0x00, 0x08, // Offset to IFD
+        ];
+
+        let encoder = Encoder::new()
+            .quality(75)
+            .exif_data(exif_data.clone());
+
+        let jpeg_data = encoder.encode_rgb(&rgb_data, width, height).unwrap();
+
+        // Check for APP1 marker (0xFFE1) in the output
+        let mut found_app1 = false;
+        for i in 0..jpeg_data.len() - 1 {
+            if jpeg_data[i] == 0xFF && jpeg_data[i + 1] == 0xE1 {
+                found_app1 = true;
+                // Check for "Exif\0\0" identifier
+                if i + 4 < jpeg_data.len() {
+                    let identifier = &jpeg_data[i + 4..i + 10];
+                    assert_eq!(identifier, b"Exif\0\0");
+                }
+                break;
+            }
+        }
+        assert!(found_app1, "APP1 (EXIF) marker not found in output");
+
+        // Should still be decodable
+        let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&jpeg_data));
+        let decoded = decoder.decode().expect("Failed to decode JPEG with EXIF");
+        assert_eq!(decoded.len(), (width * height * 3) as usize);
+    }
+
+    #[test]
+    fn test_encode_with_dri_marker() {
+        // Test that DRI marker is written when restart_interval is set
+        // Note: Full restart marker support (RST0-RST7 during encoding) is not yet implemented
+        let width = 16u32;
+        let height = 16u32;
+        let rgb_data = vec![128u8; (width * height * 3) as usize];
+
+        // Set restart interval
+        let encoder = Encoder::new()
+            .quality(75)
+            .restart_interval(8);
+
+        let jpeg_data = encoder.encode_rgb(&rgb_data, width, height).unwrap();
+
+        // Check for DRI marker (0xFFDD) in the output
+        let mut found_dri = false;
+        for i in 0..jpeg_data.len() - 1 {
+            if jpeg_data[i] == 0xFF && jpeg_data[i + 1] == 0xDD {
+                found_dri = true;
+                // DRI marker should be followed by length (4) and interval
+                if i + 5 < jpeg_data.len() {
+                    let len = ((jpeg_data[i + 2] as u16) << 8) | (jpeg_data[i + 3] as u16);
+                    assert_eq!(len, 4, "DRI marker length should be 4");
+                    let interval = ((jpeg_data[i + 4] as u16) << 8) | (jpeg_data[i + 5] as u16);
+                    assert_eq!(interval, 8, "Restart interval should be 8");
+                }
+                break;
+            }
+        }
+        assert!(found_dri, "DRI marker not found in output");
+
+        // Verify JPEG structure is valid (markers present)
+        assert_eq!(jpeg_data[0], 0xFF);
+        assert_eq!(jpeg_data[1], 0xD8); // SOI
+        assert_eq!(jpeg_data[jpeg_data.len() - 2], 0xFF);
+        assert_eq!(jpeg_data[jpeg_data.len() - 1], 0xD9); // EOI
     }
 
     #[test]

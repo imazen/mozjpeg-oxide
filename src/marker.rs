@@ -364,6 +364,71 @@ impl<W: Write> MarkerWriter<W> {
         Ok(())
     }
 
+    /// Write APP1 marker with EXIF data.
+    ///
+    /// # Arguments
+    /// * `exif_data` - Raw EXIF data (TIFF structure, without "Exif\0\0" header)
+    ///
+    /// The marker is written as: `0xFF 0xE1 [length] "Exif\0\0" [exif_data]`
+    pub fn write_app1_exif(&mut self, exif_data: &[u8]) -> std::io::Result<()> {
+        // APP1 marker
+        self.emit_marker(0xE1)?;
+
+        // Length = 2 (length field) + 6 ("Exif\0\0") + data length
+        let total_len = 2 + 6 + exif_data.len();
+        if total_len > 65535 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "EXIF data too large",
+            ));
+        }
+        self.emit_2bytes(total_len as u16)?;
+
+        // EXIF identifier
+        for &b in b"Exif\0\0" {
+            self.emit_byte(b)?;
+        }
+
+        // EXIF data (TIFF structure)
+        for &b in exif_data {
+            self.emit_byte(b)?;
+        }
+
+        Ok(())
+    }
+
+    /// Write generic APP marker with raw data.
+    ///
+    /// # Arguments
+    /// * `app_num` - APP marker number (0-15, e.g., 1 for EXIF, 2 for ICC)
+    /// * `data` - Raw marker data (including any identifier)
+    pub fn write_app(&mut self, app_num: u8, data: &[u8]) -> std::io::Result<()> {
+        if app_num > 15 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "APP marker number must be 0-15",
+            ));
+        }
+
+        self.emit_marker(0xE0 + app_num)?;
+
+        // Length = 2 (length field) + data length
+        let total_len = 2 + data.len();
+        if total_len > 65535 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "APP data too large",
+            ));
+        }
+        self.emit_2bytes(total_len as u16)?;
+
+        for &b in data {
+            self.emit_byte(b)?;
+        }
+
+        Ok(())
+    }
+
     /// Get total bytes written.
     pub fn bytes_written(&self) -> usize {
         self.bytes_written

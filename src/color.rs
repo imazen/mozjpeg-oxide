@@ -10,6 +10,11 @@
 //! Cb = -0.16874 * R - 0.33126 * G + 0.50000 * B + 128
 //! Cr =  0.50000 * R - 0.41869 * G - 0.08131 * B + 128
 //! ```
+//!
+//! SIMD-optimized versions are available using the `wide` crate for
+//! processing multiple pixels in parallel.
+
+use wide::i32x4;
 
 /// Fixed-point precision bits (16 bits gives ~4 decimal digits precision)
 const SCALEBITS: i32 = 16;
@@ -95,6 +100,9 @@ pub fn rgb_to_gray(r: u8, g: u8, b: u8) -> u8 {
 /// The input is interleaved RGB data, and the output is three separate
 /// component planes (Y, Cb, Cr), matching libjpeg's internal format.
 ///
+/// This function uses SIMD to process 4 pixels at a time for better
+/// performance on supported architectures.
+///
 /// # Arguments
 /// * `rgb` - Input RGB data (3 bytes per pixel: R, G, B)
 /// * `y_out` - Output Y component buffer
@@ -115,7 +123,80 @@ pub fn convert_rgb_to_ycbcr(
     debug_assert_eq!(cb_out.len(), width * height);
     debug_assert_eq!(cr_out.len(), width * height);
 
-    for i in 0..(width * height) {
+    let num_pixels = width * height;
+
+    // SIMD constants
+    let fix_y_r = i32x4::splat(FIX_0_29900);
+    let fix_y_g = i32x4::splat(FIX_0_58700);
+    let fix_y_b = i32x4::splat(FIX_0_11400);
+    let fix_cb_r = i32x4::splat(-FIX_0_16874);
+    let fix_cb_g = i32x4::splat(-FIX_0_33126);
+    let fix_cb_b = i32x4::splat(FIX_0_50000);
+    let fix_cr_r = i32x4::splat(FIX_0_50000);
+    let fix_cr_g = i32x4::splat(-FIX_0_41869);
+    let fix_cr_b = i32x4::splat(-FIX_0_08131);
+    let half = i32x4::splat(ONE_HALF);
+    let center = i32x4::splat(CBCR_CENTER);
+    let zero = i32x4::splat(0);
+    let max_val = i32x4::splat(255);
+
+    // Process 4 pixels at a time
+    let chunks = num_pixels / 4;
+    for chunk in 0..chunks {
+        let base = chunk * 4;
+
+        // Gather RGB values (interleaved to planar)
+        let r = i32x4::new([
+            rgb[base * 3] as i32,
+            rgb[base * 3 + 3] as i32,
+            rgb[base * 3 + 6] as i32,
+            rgb[base * 3 + 9] as i32,
+        ]);
+        let g = i32x4::new([
+            rgb[base * 3 + 1] as i32,
+            rgb[base * 3 + 4] as i32,
+            rgb[base * 3 + 7] as i32,
+            rgb[base * 3 + 10] as i32,
+        ]);
+        let b = i32x4::new([
+            rgb[base * 3 + 2] as i32,
+            rgb[base * 3 + 5] as i32,
+            rgb[base * 3 + 8] as i32,
+            rgb[base * 3 + 11] as i32,
+        ]);
+
+        // Y = 0.29900 * R + 0.58700 * G + 0.11400 * B
+        let y = (fix_y_r * r + fix_y_g * g + fix_y_b * b + half) >> SCALEBITS;
+        let y = y.max(zero).min(max_val);
+
+        // Cb = -0.16874 * R - 0.33126 * G + 0.50000 * B + 128
+        let cb = ((fix_cb_r * r + fix_cb_g * g + fix_cb_b * b + half) >> SCALEBITS) + center;
+        let cb = cb.max(zero).min(max_val);
+
+        // Cr = 0.50000 * R - 0.41869 * G - 0.08131 * B + 128
+        let cr = ((fix_cr_r * r + fix_cr_g * g + fix_cr_b * b + half) >> SCALEBITS) + center;
+        let cr = cr.max(zero).min(max_val);
+
+        // Store results
+        let y_arr = y.to_array();
+        let cb_arr = cb.to_array();
+        let cr_arr = cr.to_array();
+        y_out[base] = y_arr[0] as u8;
+        y_out[base + 1] = y_arr[1] as u8;
+        y_out[base + 2] = y_arr[2] as u8;
+        y_out[base + 3] = y_arr[3] as u8;
+        cb_out[base] = cb_arr[0] as u8;
+        cb_out[base + 1] = cb_arr[1] as u8;
+        cb_out[base + 2] = cb_arr[2] as u8;
+        cb_out[base + 3] = cb_arr[3] as u8;
+        cr_out[base] = cr_arr[0] as u8;
+        cr_out[base + 1] = cr_arr[1] as u8;
+        cr_out[base + 2] = cr_arr[2] as u8;
+        cr_out[base + 3] = cr_arr[3] as u8;
+    }
+
+    // Handle remaining pixels with scalar code
+    for i in (chunks * 4)..num_pixels {
         let r = rgb[i * 3];
         let g = rgb[i * 3 + 1];
         let b = rgb[i * 3 + 2];
@@ -128,6 +209,9 @@ pub fn convert_rgb_to_ycbcr(
 
 /// Convert an RGB image buffer to grayscale.
 ///
+/// This function uses SIMD to process 4 pixels at a time for better
+/// performance.
+///
 /// # Arguments
 /// * `rgb` - Input RGB data (3 bytes per pixel: R, G, B)
 /// * `gray_out` - Output grayscale buffer
@@ -137,7 +221,51 @@ pub fn convert_rgb_to_gray(rgb: &[u8], gray_out: &mut [u8], width: usize, height
     debug_assert_eq!(rgb.len(), width * height * 3);
     debug_assert_eq!(gray_out.len(), width * height);
 
-    for i in 0..(width * height) {
+    let num_pixels = width * height;
+
+    // SIMD constants for Y calculation
+    let fix_y_r = i32x4::splat(FIX_0_29900);
+    let fix_y_g = i32x4::splat(FIX_0_58700);
+    let fix_y_b = i32x4::splat(FIX_0_11400);
+    let half = i32x4::splat(ONE_HALF);
+
+    // Process 4 pixels at a time
+    let chunks = num_pixels / 4;
+    for chunk in 0..chunks {
+        let base = chunk * 4;
+
+        // Gather RGB values
+        let r = i32x4::new([
+            rgb[base * 3] as i32,
+            rgb[base * 3 + 3] as i32,
+            rgb[base * 3 + 6] as i32,
+            rgb[base * 3 + 9] as i32,
+        ]);
+        let g = i32x4::new([
+            rgb[base * 3 + 1] as i32,
+            rgb[base * 3 + 4] as i32,
+            rgb[base * 3 + 7] as i32,
+            rgb[base * 3 + 10] as i32,
+        ]);
+        let b = i32x4::new([
+            rgb[base * 3 + 2] as i32,
+            rgb[base * 3 + 5] as i32,
+            rgb[base * 3 + 8] as i32,
+            rgb[base * 3 + 11] as i32,
+        ]);
+
+        // Y = 0.29900 * R + 0.58700 * G + 0.11400 * B
+        let y = (fix_y_r * r + fix_y_g * g + fix_y_b * b + half) >> SCALEBITS;
+        let y_arr = y.to_array();
+
+        gray_out[base] = y_arr[0] as u8;
+        gray_out[base + 1] = y_arr[1] as u8;
+        gray_out[base + 2] = y_arr[2] as u8;
+        gray_out[base + 3] = y_arr[3] as u8;
+    }
+
+    // Handle remaining pixels
+    for i in (chunks * 4)..num_pixels {
         let r = rgb[i * 3];
         let g = rgb[i * 3 + 1];
         let b = rgb[i * 3 + 2];

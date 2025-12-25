@@ -12,12 +12,32 @@ env:
 
 jobs:
   test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Test ${{ matrix.os }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          # Linux x64
+          - os: Linux
+            arch: x64
+            runner: ubuntu-24.04
+          # Linux ARM64
+          - os: Linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          # macOS x64 (Intel)
+          - os: macOS
+            arch: x64
+            runner: macos-13
+          # macOS ARM64 (Apple Silicon)
+          - os: macOS
+            arch: arm64
+            runner: macos-14
+          # Windows x64
+          - os: Windows
+            arch: x64
+            runner: windows-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -34,9 +54,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          key: ${{ runner.os }}-${{ matrix.arch }}-cargo-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ matrix.arch }}-cargo-
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -45,11 +65,14 @@ jobs:
         # Only run clippy on main crate lib - sys-local requires local mozjpeg source
         run: cargo clippy -p mozjpeg-oxide --lib -- -D warnings
         # Skip clippy on Windows for now due to potential FFI issues
-        if: runner.os != 'Windows'
+        if: matrix.os != 'Windows'
 
       - name: Build
         # Only build main crate - sys-local requires local mozjpeg source
         run: cargo build -p mozjpeg-oxide
+
+      - name: Build (release)
+        run: cargo build -p mozjpeg-oxide --release
 
       - name: Run unit tests
         run: cargo test -p mozjpeg-oxide --lib
@@ -107,13 +130,13 @@ jobs:
 
   # Minimum supported Rust version check
   msrv:
-    name: MSRV (1.70.0)
+    name: MSRV (1.85.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust 1.70.0
-        uses: dtolnay/rust-toolchain@1.70.0
+      - name: Install Rust 1.85.0
+        uses: dtolnay/rust-toolchain@1.85.0
 
       - name: Build with MSRV
         # Only build main crate - dev dependencies may require newer Rust

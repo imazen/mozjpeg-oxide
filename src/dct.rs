@@ -842,7 +842,7 @@ mod tests {
         let mut samples = [0i16; DCTSIZE2];
         for row in 0..DCTSIZE {
             for col in 0..DCTSIZE {
-                samples[row * DCTSIZE + col] = ((row as i16 - 4) * 20 + (col as i16 - 4) * 10);
+                samples[row * DCTSIZE + col] = (row as i16 - 4) * 20 + (col as i16 - 4) * 10;
             }
         }
 
@@ -914,7 +914,7 @@ mod tests {
         let mut samples = [0i16; DCTSIZE2];
         for row in 0..DCTSIZE {
             for col in 0..DCTSIZE {
-                samples[row * DCTSIZE + col] = ((row as i16 - 4) * 20 + (col as i16 - 4) * 10);
+                samples[row * DCTSIZE + col] = (row as i16 - 4) * 20 + (col as i16 - 4) * 10;
             }
         }
 

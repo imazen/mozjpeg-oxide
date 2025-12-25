@@ -24,7 +24,7 @@ pub const NUM_HUFF_TBLS: usize = 4;
 /// to build derived tables.
 #[derive(Clone, Debug)]
 pub struct HuffTable {
-    /// Number of codes of each length (bits[0] is unused, bits[1-16] are counts)
+    /// Number of codes of each length (`bits[0]` is unused, `bits[1-16]` are counts)
     pub bits: [u8; 17],
     /// Symbol values in order of increasing code length
     pub huffval: [u8; 256],
@@ -372,10 +372,8 @@ impl FrequencyCounter {
 mod tests {
     use super::*;
     use crate::consts::{
-        DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES,
-        AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES,
-        DC_CHROMINANCE_BITS, DC_CHROMINANCE_VALUES,
-        AC_CHROMINANCE_BITS, AC_CHROMINANCE_VALUES,
+        AC_CHROMINANCE_BITS, AC_CHROMINANCE_VALUES, AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES,
+        DC_CHROMINANCE_BITS, DC_CHROMINANCE_VALUES, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES,
     };
 
     fn create_std_dc_luma_table() -> HuffTable {
@@ -451,7 +449,10 @@ mod tests {
         // Most symbols should have short codes (3-4 bits for 8 uniform symbols)
         // The exact distribution depends on how the pseudo-symbol affects the tree
         let short_codes: u8 = htbl.bits[1..=4].iter().sum();
-        assert_eq!(short_codes, 8, "All 8 symbols should have codes of 4 bits or less");
+        assert_eq!(
+            short_codes, 8,
+            "All 8 symbols should have codes of 4 bits or less"
+        );
     }
 
     #[test]
@@ -459,9 +460,9 @@ mod tests {
         // Test with highly skewed frequencies
         let mut freq = [0i64; 257];
         freq[0] = 1000; // Very common
-        freq[1] = 100;  // Less common
-        freq[2] = 10;   // Rare
-        freq[3] = 1;    // Very rare
+        freq[1] = 100; // Less common
+        freq[2] = 10; // Rare
+        freq[3] = 1; // Very rare
 
         let htbl = generate_optimal_table(&mut freq).unwrap();
 

@@ -118,15 +118,10 @@ fn test_edge_cropping_non_aligned_dimensions() {
         // Encode with various settings
         let configs = [
             ("baseline", Encoder::new().quality(85)),
-            (
-                "progressive",
-                Encoder::new().quality(85).progressive(true),
-            ),
+            ("progressive", Encoder::new().quality(85).progressive(true)),
             (
                 "trellis",
-                Encoder::new()
-                    .quality(85)
-                    .trellis(TrellisConfig::default()),
+                Encoder::new().quality(85).trellis(TrellisConfig::default()),
             ),
         ];
 
@@ -353,14 +348,8 @@ fn test_all_encoder_permutations_work() {
         }
     }
 
-    assert_eq!(
-        success_count, total_count,
-        "Not all permutations succeeded"
-    );
-    println!(
-        "All {} encoder permutations worked correctly",
-        total_count
-    );
+    assert_eq!(success_count, total_count, "Not all permutations succeeded");
+    println!("All {} encoder permutations worked correctly", total_count);
 }
 
 // =============================================================================

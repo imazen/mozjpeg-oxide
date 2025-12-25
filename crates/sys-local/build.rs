@@ -14,8 +14,14 @@ fn main() {
         .join("mozjpeg");
 
     println!("cargo:rerun-if-changed={}", mozjpeg_src.display());
-    println!("cargo:rerun-if-changed={}/mozjpeg_test_exports.c", mozjpeg_src.display());
-    println!("cargo:rerun-if-changed={}/mozjpeg_test_exports.h", mozjpeg_src.display());
+    println!(
+        "cargo:rerun-if-changed={}/mozjpeg_test_exports.c",
+        mozjpeg_src.display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}/mozjpeg_test_exports.h",
+        mozjpeg_src.display()
+    );
 
     // Build mozjpeg with CMake
     // Note: mozjpeg uses BUILD_SHARED_LIBS, not ENABLE_SHARED/ENABLE_STATIC

@@ -40,7 +40,10 @@ fn test_trellis_progressive_comparison() {
 
     println!("\n=== Trellis/Progressive Comparison ===");
     println!("Image: {} ({}x{})", path.display(), width, height);
-    println!("Rust (progressive+trellis): {} bytes", rust_progressive.len());
+    println!(
+        "Rust (progressive+trellis): {} bytes",
+        rust_progressive.len()
+    );
     println!("Rust (baseline+trellis):    {} bytes", rust_baseline.len());
     println!("C mozjpeg:                  {} bytes", c_jpeg.len());
 
@@ -89,14 +92,30 @@ fn test_trellis_progressive_comparison() {
     // Quality should be reasonable (> 28 dB at Q75 for real photos)
     // Note: Synthetic patterns achieve higher PSNR, but real photos with
     // complex detail typically achieve 28-35 dB at Q75.
-    assert!(psnr_rust_prog > 28.0, "Progressive PSNR too low: {:.2}", psnr_rust_prog);
-    assert!(psnr_rust_base > 28.0, "Baseline PSNR too low: {:.2}", psnr_rust_base);
+    assert!(
+        psnr_rust_prog > 28.0,
+        "Progressive PSNR too low: {:.2}",
+        psnr_rust_prog
+    );
+    assert!(
+        psnr_rust_base > 28.0,
+        "Baseline PSNR too low: {:.2}",
+        psnr_rust_base
+    );
 
     // Rust should be within 2 dB of C mozjpeg
     let prog_diff = (psnr_rust_prog - psnr_c).abs();
     let base_diff = (psnr_rust_base - psnr_c).abs();
-    assert!(prog_diff < 2.0, "Progressive differs too much from C: {:.2} dB", prog_diff);
-    assert!(base_diff < 2.0, "Baseline differs too much from C: {:.2} dB", base_diff);
+    assert!(
+        prog_diff < 2.0,
+        "Progressive differs too much from C: {:.2} dB",
+        prog_diff
+    );
+    assert!(
+        base_diff < 2.0,
+        "Baseline differs too much from C: {:.2} dB",
+        base_diff
+    );
 
     // DSSIM perceptual quality check
     let dssim_rust_prog = calculate_dssim(&rgb_data, &rust_prog_decoded, width, height);
@@ -104,8 +123,16 @@ fn test_trellis_progressive_comparison() {
     println!("\nDSSIM (lower is better):");
     println!("  Rust progressive: {:.6}", dssim_rust_prog);
     println!("  Rust baseline:    {:.6}", dssim_rust_base);
-    assert!(dssim_rust_prog < 0.003, "Progressive DSSIM too high: {:.6}", dssim_rust_prog);
-    assert!(dssim_rust_base < 0.003, "Baseline DSSIM too high: {:.6}", dssim_rust_base);
+    assert!(
+        dssim_rust_prog < 0.003,
+        "Progressive DSSIM too high: {:.6}",
+        dssim_rust_prog
+    );
+    assert!(
+        dssim_rust_base < 0.003,
+        "Baseline DSSIM too high: {:.6}",
+        dssim_rust_base
+    );
 }
 
 /// Test small image encoding.
@@ -149,7 +176,11 @@ fn test_small_image_encoding() {
     println!("Baseline PSNR:    {:.2} dB", base_psnr);
 
     // Both should decode successfully with reasonable quality
-    assert!(prog_psnr > 30.0, "Progressive PSNR too low: {:.2}", prog_psnr);
+    assert!(
+        prog_psnr > 30.0,
+        "Progressive PSNR too low: {:.2}",
+        prog_psnr
+    );
     assert!(base_psnr > 30.0, "Baseline PSNR too low: {:.2}", base_psnr);
 
     // DSSIM perceptual quality check
@@ -157,8 +188,16 @@ fn test_small_image_encoding() {
     let base_dssim = calculate_dssim(&rgb, &base_dec, width, height);
     println!("Progressive DSSIM: {:.6}", prog_dssim);
     println!("Baseline DSSIM:    {:.6}", base_dssim);
-    assert!(prog_dssim < 0.003, "Progressive DSSIM too high: {:.6}", prog_dssim);
-    assert!(base_dssim < 0.003, "Baseline DSSIM too high: {:.6}", base_dssim);
+    assert!(
+        prog_dssim < 0.003,
+        "Progressive DSSIM too high: {:.6}",
+        prog_dssim
+    );
+    assert!(
+        base_dssim < 0.003,
+        "Baseline DSSIM too high: {:.6}",
+        base_dssim
+    );
 }
 
 fn decode_jpeg(data: &[u8]) -> Vec<u8> {
@@ -272,10 +311,7 @@ fn load_png(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 
     let rgb_data = match info.color_type {
         png::ColorType::Rgb => bytes.to_vec(),
-        png::ColorType::Rgba => bytes
-            .chunks(4)
-            .flat_map(|c| [c[0], c[1], c[2]])
-            .collect(),
+        png::ColorType::Rgba => bytes.chunks(4).flat_map(|c| [c[0], c[1], c[2]]).collect(),
         _ => return None,
     };
 

@@ -125,13 +125,12 @@ fn catmull_rom(value1: i16, value2: i16, value3: i16, value4: i16, t: f32, size:
     let t2 = t * t;
     let t3 = t2 * t;
 
-    let f1 = 2.0 * t3 - 3.0 * t2 + 1.0;  // h00: value at t=0
-    let f2 = -2.0 * t3 + 3.0 * t2;        // h01: value at t=1
-    let f3 = t3 - 2.0 * t2 + t;           // h10: tangent at t=0
-    let f4 = t3 - t2;                      // h11: tangent at t=1
+    let f1 = 2.0 * t3 - 3.0 * t2 + 1.0; // h00: value at t=0
+    let f2 = -2.0 * t3 + 3.0 * t2; // h01: value at t=1
+    let f3 = t3 - 2.0 * t2 + t; // h10: tangent at t=0
+    let f4 = t3 - t2; // h11: tangent at t=1
 
-    value2 as f32 * f1 + tan1 as f32 * f3 +
-    value3 as f32 * f2 + tan2 as f32 * f4
+    value2 as f32 * f1 + tan1 as f32 * f3 + value3 as f32 * f2 + tan2 as f32 * f4
 }
 
 /// Preprocess an 8x8 block to reduce ringing artifacts on white backgrounds.
@@ -216,7 +215,11 @@ pub fn preprocess_deringing(data: &mut [i16; DCTSIZE2], dc_quant: u16) {
         let f2 = data[JPEG_NATURAL_ORDER[if start >= 2 { start - 2 } else { 0 }]];
 
         let l1 = data[JPEG_NATURAL_ORDER[if end < DCTSIZE2 { end } else { DCTSIZE2 - 1 }]];
-        let l2 = data[JPEG_NATURAL_ORDER[if end + 1 < DCTSIZE2 { end + 1 } else { DCTSIZE2 - 1 }]];
+        let l2 = data[JPEG_NATURAL_ORDER[if end + 1 < DCTSIZE2 {
+            end + 1
+        } else {
+            DCTSIZE2 - 1
+        }]];
 
         // Calculate upward slopes at the edges
         // Use the steeper of: slope from two samples back, or slope to max
@@ -243,12 +246,12 @@ pub fn preprocess_deringing(data: &mut [i16; DCTSIZE2], dc_quant: u16) {
             // Interpolate a smooth curve that peaks above MAX_SAMPLE
             // Control points: approaching slope, max, max, departing slope
             let interpolated = catmull_rom(
-                MAX_SAMPLE - fslope,  // virtual point before (for tangent)
-                MAX_SAMPLE,           // start of plateau
-                MAX_SAMPLE,           // end of plateau
-                MAX_SAMPLE - lslope,  // virtual point after (for tangent)
+                MAX_SAMPLE - fslope, // virtual point before (for tangent)
+                MAX_SAMPLE,          // start of plateau
+                MAX_SAMPLE,          // end of plateau
+                MAX_SAMPLE - lslope, // virtual point after (for tangent)
                 position,
-                length
+                length,
             );
 
             // Ceiling and clamp to max overshoot
@@ -270,18 +273,30 @@ mod tests {
     fn test_catmull_rom_midpoint() {
         // At t=0.5, should be roughly at the midpoint value
         let result = catmull_rom(100, 110, 120, 130, 0.5, 1);
-        assert!((result - 115.0).abs() < 1.0, "Expected ~115, got {}", result);
+        assert!(
+            (result - 115.0).abs() < 1.0,
+            "Expected ~115, got {}",
+            result
+        );
     }
 
     #[test]
     fn test_catmull_rom_endpoints() {
         // At t=0, should be close to value2
         let result0 = catmull_rom(100, 110, 120, 130, 0.0, 1);
-        assert!((result0 - 110.0).abs() < 0.1, "Expected 110, got {}", result0);
+        assert!(
+            (result0 - 110.0).abs() < 0.1,
+            "Expected 110, got {}",
+            result0
+        );
 
         // At t=1, should be close to value3
         let result1 = catmull_rom(100, 110, 120, 130, 1.0, 1);
-        assert!((result1 - 120.0).abs() < 0.1, "Expected 120, got {}", result1);
+        assert!(
+            (result1 - 120.0).abs() < 0.1,
+            "Expected 120, got {}",
+            result1
+        );
     }
 
     #[test]
@@ -292,7 +307,10 @@ mod tests {
 
         preprocess_deringing(&mut data, 16);
 
-        assert_eq!(data, original, "Block with no max pixels should be unchanged");
+        assert_eq!(
+            data, original,
+            "Block with no max pixels should be unchanged"
+        );
     }
 
     #[test]
@@ -303,7 +321,10 @@ mod tests {
 
         preprocess_deringing(&mut data, 16);
 
-        assert_eq!(data, original, "Block with all max pixels should be unchanged");
+        assert_eq!(
+            data, original,
+            "Block with all max pixels should be unchanged"
+        );
     }
 
     #[test]
@@ -331,7 +352,10 @@ mod tests {
                 break;
             }
         }
-        assert!(has_overshoot, "Deringing should create overshoot above MAX_SAMPLE");
+        assert!(
+            has_overshoot,
+            "Deringing should create overshoot above MAX_SAMPLE"
+        );
 
         // Check that overshoot is limited
         for i in 10..16 {
@@ -369,7 +393,8 @@ mod tests {
         assert!(
             mid_val >= edge_val,
             "Middle of curve should be >= edges: mid={}, edge={}",
-            mid_val, edge_val
+            mid_val,
+            edge_val
         );
     }
 
@@ -386,7 +411,7 @@ mod tests {
         let mut data_small_quant = data;
         let mut data_large_quant = data;
 
-        preprocess_deringing(&mut data_small_quant, 2);  // Small DC quant = limited overshoot
+        preprocess_deringing(&mut data_small_quant, 2); // Small DC quant = limited overshoot
         preprocess_deringing(&mut data_large_quant, 32); // Larger DC quant = more overshoot allowed
 
         // Find max values in each
@@ -396,7 +421,8 @@ mod tests {
         assert!(
             max_small <= max_large,
             "Smaller DC quant should allow less overshoot: small_max={}, large_max={}",
-            max_small, max_large
+            max_small,
+            max_large
         );
     }
 }

@@ -196,7 +196,7 @@ pub fn generate_optimized_progressive_scans(num_components: u8) -> Vec<ScanInfo>
 /// * `num_components` - Number of color components (1 for grayscale, 3 for YCbCr)
 ///
 /// # Returns
-/// Vector of candidate scan scripts, each a Vec<ScanInfo>.
+/// Vector of candidate scan scripts, each a `Vec<ScanInfo>`.
 pub fn generate_scan_candidates(num_components: u8) -> Vec<Vec<ScanInfo>> {
     let mut candidates = Vec::new();
 
@@ -346,8 +346,8 @@ pub fn validate_scan_script(scans: &[ScanInfo], num_components: u8) -> Result<()
         // But in baseline mode, a single scan can contain DC+AC
         // We only check this for progressive scans (where ah or al are non-zero,
         // or spectral selection is partial)
-        let is_progressive_scan = scan.ah != 0 || scan.al != 0 ||
-                                  (scan.ss == 0 && scan.se != 0 && scan.se != 63);
+        let is_progressive_scan =
+            scan.ah != 0 || scan.al != 0 || (scan.ss == 0 && scan.se != 0 && scan.se != 63);
 
         if is_progressive_scan {
             // In progressive, interleaved DC scans must be DC-only

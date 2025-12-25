@@ -62,8 +62,8 @@ impl<W: Write> BitWriter<W> {
             let overflow_bits = (-self.free_bits) as u32;
 
             // Put upper bits into current buffer before flush
-            self.put_buffer = (self.put_buffer << (size + self.free_bits))
-                | ((code as u64) >> overflow_bits);
+            self.put_buffer =
+                (self.put_buffer << (size + self.free_bits)) | ((code as u64) >> overflow_bits);
             self.flush_buffer()?;
 
             // Reset buffer with only the overflow (lower) bits
@@ -247,8 +247,8 @@ mod tests {
         let mut writer = VecBitWriter::new_vec();
 
         // Write several small values
-        writer.put_bits(0b11, 2).unwrap();  // 11
-        writer.put_bits(0b00, 2).unwrap();  // 00
+        writer.put_bits(0b11, 2).unwrap(); // 11
+        writer.put_bits(0b00, 2).unwrap(); // 00
         writer.put_bits(0b1111, 4).unwrap(); // 1111
         writer.flush().unwrap();
 
@@ -340,8 +340,8 @@ mod tests {
 
         // Simulate typical Huffman encoding pattern
         // DC: category 3, value 5 -> code + bits
-        writer.put_bits(0b100, 3).unwrap();  // 3-bit code
-        writer.put_bits(0b101, 3).unwrap();  // 3-bit value
+        writer.put_bits(0b100, 3).unwrap(); // 3-bit code
+        writer.put_bits(0b101, 3).unwrap(); // 3-bit value
 
         // AC: EOB (0x00) -> 4-bit code
         writer.put_bits(0b1010, 4).unwrap();
@@ -358,7 +358,7 @@ mod tests {
         let mut writer = VecBitWriter::new_vec();
 
         writer.put_bits(0xAB, 8).unwrap();
-        writer.put_bits(0xFF, 8).unwrap();  // Will be stuffed
+        writer.put_bits(0xFF, 8).unwrap(); // Will be stuffed
         writer.put_bits(0xCD, 8).unwrap();
         writer.flush().unwrap();
 
@@ -371,8 +371,8 @@ mod tests {
         let mut writer = VecBitWriter::new_vec();
 
         // Write marker (raw bytes, no stuffing)
-        writer.write_bytes(&[0xFF, 0xD8]).unwrap();  // SOI marker
-        writer.write_bytes(&[0xFF, 0xD9]).unwrap();  // EOI marker
+        writer.write_bytes(&[0xFF, 0xD8]).unwrap(); // SOI marker
+        writer.write_bytes(&[0xFF, 0xD9]).unwrap(); // EOI marker
 
         let bytes = writer.into_bytes();
         assert_eq!(bytes, vec![0xFF, 0xD8, 0xFF, 0xD9]);

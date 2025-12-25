@@ -102,18 +102,18 @@ fn test_quality_scaling_matches_c() {
 fn test_rgb_to_ycbcr_matches_c() {
     // Test corner cases and various colors
     let test_colors: &[(u8, u8, u8)] = &[
-        (0, 0, 0),        // Black
-        (255, 255, 255),  // White
-        (255, 0, 0),      // Red
-        (0, 255, 0),      // Green
-        (0, 0, 255),      // Blue
-        (255, 255, 0),    // Yellow
-        (0, 255, 255),    // Cyan
-        (255, 0, 255),    // Magenta
-        (128, 128, 128),  // Gray
-        (100, 150, 200),  // Random
-        (1, 1, 1),        // Near black
-        (254, 254, 254),  // Near white
+        (0, 0, 0),       // Black
+        (255, 255, 255), // White
+        (255, 0, 0),     // Red
+        (0, 255, 0),     // Green
+        (0, 0, 255),     // Blue
+        (255, 255, 0),   // Yellow
+        (0, 255, 255),   // Cyan
+        (255, 0, 255),   // Magenta
+        (128, 128, 128), // Gray
+        (100, 150, 200), // Random
+        (1, 1, 1),       // Near black
+        (254, 254, 254), // Near white
     ];
 
     for &(r, g, b) in test_colors {
@@ -126,8 +126,7 @@ fn test_rgb_to_ycbcr_matches_c() {
         let mut c_cr: i32 = 0;
         unsafe {
             ffi::mozjpeg_test_rgb_to_ycbcr(
-                r as i32, g as i32, b as i32,
-                &mut c_y, &mut c_cb, &mut c_cr,
+                r as i32, g as i32, b as i32, &mut c_y, &mut c_cb, &mut c_cr,
             );
         }
 
@@ -135,7 +134,15 @@ fn test_rgb_to_ycbcr_matches_c() {
         assert!(
             rust_y as i32 == c_y && rust_cb as i32 == c_cb && rust_cr as i32 == c_cr,
             "RGB({},{},{}) -> YCbCr mismatch: Rust=({},{},{}), C=({},{},{})",
-            r, g, b, rust_y, rust_cb, rust_cr, c_y, c_cb, c_cr
+            r,
+            g,
+            b,
+            rust_y,
+            rust_cb,
+            rust_cr,
+            c_y,
+            c_cb,
+            c_cr
         );
     }
 }
@@ -158,8 +165,7 @@ fn test_rgb_to_ycbcr_exhaustive() {
                 let mut c_cr: i32 = 0;
                 unsafe {
                     ffi::mozjpeg_test_rgb_to_ycbcr(
-                        r as i32, g as i32, b as i32,
-                        &mut c_y, &mut c_cb, &mut c_cr,
+                        r as i32, g as i32, b as i32, &mut c_y, &mut c_cb, &mut c_cr,
                     );
                 }
 
@@ -174,7 +180,9 @@ fn test_rgb_to_ycbcr_exhaustive() {
     assert!(
         max_y_diff == 0 && max_cb_diff == 0 && max_cr_diff == 0,
         "Max differences: Y={}, Cb={}, Cr={} (should all be 0)",
-        max_y_diff, max_cb_diff, max_cr_diff
+        max_y_diff,
+        max_cb_diff,
+        max_cr_diff
     );
 }
 
@@ -186,14 +194,20 @@ fn test_downsample_h2v2_matches_c() {
         // Uniform
         ([128; 8], [128; 8]),
         // Gradient
-        ([100, 110, 120, 130, 140, 150, 160, 170],
-         [105, 115, 125, 135, 145, 155, 165, 175]),
+        (
+            [100, 110, 120, 130, 140, 150, 160, 170],
+            [105, 115, 125, 135, 145, 155, 165, 175],
+        ),
         // Alternating
-        ([0, 255, 0, 255, 0, 255, 0, 255],
-         [255, 0, 255, 0, 255, 0, 255, 0]),
+        (
+            [0, 255, 0, 255, 0, 255, 0, 255],
+            [255, 0, 255, 0, 255, 0, 255, 0],
+        ),
         // Edge case
-        ([0, 0, 255, 255, 0, 0, 255, 255],
-         [0, 0, 255, 255, 0, 0, 255, 255]),
+        (
+            [0, 0, 255, 255, 0, 0, 255, 255],
+            [0, 0, 255, 255, 0, 0, 255, 255],
+        ),
     ];
 
     for (row0, row1) in test_cases {
@@ -286,7 +300,9 @@ fn test_nbits_matches_c() {
     }
 
     // Also test some larger values
-    for val in [2000, 4095, 4096, 8191, 8192, 16383, 16384, 32767, 32768, 65535] {
+    for val in [
+        2000, 4095, 4096, 8191, 8192, 16383, 16384, 32767, 32768, 65535,
+    ] {
         let c_result = unsafe { ffi::mozjpeg_test_nbits(val) };
         let rust_result = 32 - (val as u32).leading_zeros() as i32;
 
@@ -322,9 +338,7 @@ fn test_rust_encoder_quality() {
     }
 
     // Encode with Rust implementation
-    let rust_encoder = Encoder::new()
-        .quality(75)
-        .subsampling(Subsampling::S420);
+    let rust_encoder = Encoder::new().quality(75).subsampling(Subsampling::S420);
     let rust_jpeg = rust_encoder.encode_rgb(&rgb_data, width, height).unwrap();
 
     // Verify Rust output is valid JPEG
@@ -379,7 +393,9 @@ fn test_rust_encoder_quality_levels() {
 
         // Verify it's decodable
         let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&jpeg));
-        decoder.decode().expect(&format!("Failed to decode Q{} JPEG", quality));
+        decoder
+            .decode()
+            .expect(&format!("Failed to decode Q{} JPEG", quality));
 
         println!("  Q{:3}: {} bytes", quality, jpeg.len());
     }
@@ -456,7 +472,10 @@ fn test_deringing_matches_c() {
             assert!(
                 diff == 0,
                 "Deringing mismatch at index {} (natural order): Rust={}, C={}, diff={}",
-                i, rust_data[i], c_data[i], diff
+                i,
+                rust_data[i],
+                c_data[i],
+                diff
             );
         }
 
@@ -495,11 +514,14 @@ fn test_deringing_matches_c() {
             assert!(
                 diff == 0,
                 "DC quant {} mismatch at {}: Rust={}, C={}, diff={}",
-                dc_quant, i, rust_data[i], c_data[i], diff
+                dc_quant,
+                i,
+                rust_data[i],
+                c_data[i],
+                diff
             );
         }
     }
 
     println!("All deringing comparison tests passed!");
 }
-

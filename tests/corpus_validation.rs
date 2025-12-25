@@ -31,20 +31,10 @@ fn load_png(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 
     let rgb_data = match info.color_type {
         png::ColorType::Rgb => bytes.to_vec(),
-        png::ColorType::Rgba => {
-            bytes.chunks(4)
-                .flat_map(|c| [c[0], c[1], c[2]])
-                .collect()
-        }
-        png::ColorType::Grayscale => {
-            bytes.iter()
-                .flat_map(|&g| [g, g, g])
-                .collect()
-        }
+        png::ColorType::Rgba => bytes.chunks(4).flat_map(|c| [c[0], c[1], c[2]]).collect(),
+        png::ColorType::Grayscale => bytes.iter().flat_map(|&g| [g, g, g]).collect(),
         png::ColorType::GrayscaleAlpha => {
-            bytes.chunks(2)
-                .flat_map(|c| [c[0], c[0], c[0]])
-                .collect()
+            bytes.chunks(2).flat_map(|c| [c[0], c[0], c[0]]).collect()
         }
         _ => return None,
     };
@@ -53,7 +43,12 @@ fn load_png(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 }
 
 /// Encode with C mozjpeg using TestEncoderConfig settings.
-fn encode_c_with_config(rgb: &[u8], width: u32, height: u32, config: &TestEncoderConfig) -> Vec<u8> {
+fn encode_c_with_config(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    config: &TestEncoderConfig,
+) -> Vec<u8> {
     unsafe {
         let mut cinfo: jpeg_compress_struct = std::mem::zeroed();
         let mut jerr: jpeg_error_mgr = std::mem::zeroed();
@@ -78,7 +73,11 @@ fn encode_c_with_config(rgb: &[u8], width: u32, height: u32, config: &TestEncode
         cinfo.num_scans = 0;
         cinfo.scan_info = ptr::null();
 
-        jpeg_set_quality(&mut cinfo, config.quality as i32, if config.force_baseline { 1 } else { 0 });
+        jpeg_set_quality(
+            &mut cinfo,
+            config.quality as i32,
+            if config.force_baseline { 1 } else { 0 },
+        );
 
         // Set subsampling
         let (h_samp, v_samp) = match config.subsampling {
@@ -97,12 +96,21 @@ fn encode_c_with_config(rgb: &[u8], width: u32, height: u32, config: &TestEncode
 
         cinfo.optimize_coding = if config.optimize_huffman { 1 } else { 0 };
 
-        jpeg_c_set_bool_param(&mut cinfo, JBOOLEAN_TRELLIS_QUANT,
-            if config.trellis_quant { 1 } else { 0 });
-        jpeg_c_set_bool_param(&mut cinfo, JBOOLEAN_TRELLIS_QUANT_DC,
-            if config.trellis_dc { 1 } else { 0 });
-        jpeg_c_set_bool_param(&mut cinfo, JBOOLEAN_OVERSHOOT_DERINGING,
-            if config.overshoot_deringing { 1 } else { 0 });
+        jpeg_c_set_bool_param(
+            &mut cinfo,
+            JBOOLEAN_TRELLIS_QUANT,
+            if config.trellis_quant { 1 } else { 0 },
+        );
+        jpeg_c_set_bool_param(
+            &mut cinfo,
+            JBOOLEAN_TRELLIS_QUANT_DC,
+            if config.trellis_dc { 1 } else { 0 },
+        );
+        jpeg_c_set_bool_param(
+            &mut cinfo,
+            JBOOLEAN_OVERSHOOT_DERINGING,
+            if config.overshoot_deringing { 1 } else { 0 },
+        );
 
         jpeg_start_compress(&mut cinfo, 1);
 
@@ -127,11 +135,18 @@ fn psnr(original: &[u8], jpeg: &[u8]) -> f64 {
     let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(jpeg));
     let decoded = decoder.decode().expect("Decode failed");
 
-    let mse: f64 = original.iter().zip(decoded.iter())
+    let mse: f64 = original
+        .iter()
+        .zip(decoded.iter())
         .map(|(&a, &b)| (a as f64 - b as f64).powi(2))
-        .sum::<f64>() / original.len() as f64;
+        .sum::<f64>()
+        / original.len() as f64;
 
-    if mse == 0.0 { 100.0 } else { 10.0 * (255.0 * 255.0 / mse).log10() }
+    if mse == 0.0 {
+        100.0
+    } else {
+        10.0 * (255.0 * 255.0 / mse).log10()
+    }
 }
 
 /// Test Rust vs C mozjpeg on Kodak corpus.
@@ -258,7 +273,10 @@ fn test_corpus_quality_sweep() {
 
                 println!(
                     "  Q{}: Rust={} C={} ratio={:.3}",
-                    quality, rust_jpeg.len(), c_jpeg.len(), ratio
+                    quality,
+                    rust_jpeg.len(),
+                    c_jpeg.len(),
+                    ratio
                 );
 
                 // Higher quality = more tolerance for ratio differences
@@ -266,7 +284,9 @@ fn test_corpus_quality_sweep() {
                 assert!(
                     ratio < max_ratio,
                     "Q{} size ratio {:.3} exceeds {:.2}",
-                    quality, ratio, max_ratio
+                    quality,
+                    ratio,
+                    max_ratio
                 );
             }
             return; // Only test one image

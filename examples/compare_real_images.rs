@@ -74,7 +74,10 @@ fn main() {
         let height = info.height;
         let bytes_per_pixel = info.color_type.samples();
 
-        println!("  Size: {}x{}, {} bytes/pixel", width, height, bytes_per_pixel);
+        println!(
+            "  Size: {}x{}, {} bytes/pixel",
+            width, height, bytes_per_pixel
+        );
 
         // Handle different color types
         let rgb_data: Vec<u8> = if bytes_per_pixel == 4 {
@@ -110,12 +113,12 @@ fn main() {
         let orig_path = output_dir.join(&*image_name);
         fs::copy(source_path, &orig_path).unwrap();
 
-        println!("  Rust:     {:>8} bytes -> {:?}", rust_jpeg.len(), rust_path);
         println!(
-            "  C mozjpeg:{:>8} bytes -> {:?}",
-            c_jpeg.len(),
-            c_path
+            "  Rust:     {:>8} bytes -> {:?}",
+            rust_jpeg.len(),
+            rust_path
         );
+        println!("  C mozjpeg:{:>8} bytes -> {:?}", c_jpeg.len(), c_path);
         println!("  Original copied to: {:?}", orig_path);
         println!();
     }
@@ -153,7 +156,9 @@ unsafe fn encode_with_c_mozjpeg(rgb_data: &[u8], width: u32, height: u32, qualit
 
     let row_stride = (width * 3) as usize;
     while cinfo.next_scanline < cinfo.image_height {
-        let row_ptr = rgb_data.as_ptr().add(cinfo.next_scanline as usize * row_stride);
+        let row_ptr = rgb_data
+            .as_ptr()
+            .add(cinfo.next_scanline as usize * row_stride);
         let mut row_array = [row_ptr as *const u8];
         mozjpeg_sys::jpeg_write_scanlines(&mut cinfo, row_array.as_mut_ptr() as *mut *const u8, 1);
     }

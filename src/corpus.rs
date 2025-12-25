@@ -163,15 +163,11 @@ pub fn load_png_as_rgb(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 
     let rgb_data = match info.color_type {
         png::ColorType::Rgb => bytes.to_vec(),
-        png::ColorType::Rgba => bytes
-            .chunks(4)
-            .flat_map(|c| [c[0], c[1], c[2]])
-            .collect(),
+        png::ColorType::Rgba => bytes.chunks(4).flat_map(|c| [c[0], c[1], c[2]]).collect(),
         png::ColorType::Grayscale => bytes.iter().flat_map(|&g| [g, g, g]).collect(),
-        png::ColorType::GrayscaleAlpha => bytes
-            .chunks(2)
-            .flat_map(|c| [c[0], c[0], c[0]])
-            .collect(),
+        png::ColorType::GrayscaleAlpha => {
+            bytes.chunks(2).flat_map(|c| [c[0], c[0], c[0]]).collect()
+        }
         _ => return None,
     };
 

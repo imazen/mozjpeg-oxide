@@ -14,9 +14,9 @@ fn main() {
     for y in 0..height {
         for x in 0..width {
             let i = (y * width + x) as usize;
-            rgb_data[i * 3] = (x * 4) as u8;     // R gradient
+            rgb_data[i * 3] = (x * 4) as u8; // R gradient
             rgb_data[i * 3 + 1] = (y * 4) as u8; // G gradient
-            rgb_data[i * 3 + 2] = 128;           // B constant
+            rgb_data[i * 3 + 2] = 128; // B constant
         }
     }
 
@@ -41,7 +41,12 @@ fn main() {
         fs::write(&rust_path, &rust_jpeg).unwrap();
         fs::write(&c_path, &c_jpeg).unwrap();
 
-        println!("Q{}: Rust={} bytes -> {}", quality, rust_jpeg.len(), rust_path);
+        println!(
+            "Q{}: Rust={} bytes -> {}",
+            quality,
+            rust_jpeg.len(),
+            rust_path
+        );
         println!("Q{}: C   ={} bytes -> {}", quality, c_jpeg.len(), c_path);
     }
 
@@ -86,7 +91,9 @@ unsafe fn encode_with_c_mozjpeg(rgb_data: &[u8], width: u32, height: u32, qualit
 
     let row_stride = (width * 3) as usize;
     while cinfo.next_scanline < cinfo.image_height {
-        let row_ptr = rgb_data.as_ptr().add(cinfo.next_scanline as usize * row_stride);
+        let row_ptr = rgb_data
+            .as_ptr()
+            .add(cinfo.next_scanline as usize * row_stride);
         let mut row_array = [row_ptr as *const u8];
         mozjpeg_sys::jpeg_write_scanlines(&mut cinfo, row_array.as_mut_ptr() as *mut *const u8, 1);
     }

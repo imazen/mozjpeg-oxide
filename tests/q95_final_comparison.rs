@@ -27,7 +27,12 @@ fn create_photo_image(width: usize, height: usize) -> Vec<u8> {
     rgb
 }
 
-fn encode_c_with_config(rgb: &[u8], width: u32, height: u32, config: &TestEncoderConfig) -> Vec<u8> {
+fn encode_c_with_config(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    config: &TestEncoderConfig,
+) -> Vec<u8> {
     unsafe {
         let mut cinfo: jpeg_compress_struct = std::mem::zeroed();
         let mut jerr: jpeg_error_mgr = std::mem::zeroed();
@@ -71,12 +76,21 @@ fn encode_c_with_config(rgb: &[u8], width: u32, height: u32, config: &TestEncode
 
         cinfo.optimize_coding = if config.optimize_huffman { 1 } else { 0 };
 
-        jpeg_c_set_bool_param(&mut cinfo, JBOOLEAN_TRELLIS_QUANT,
-            if config.trellis_quant { 1 } else { 0 });
-        jpeg_c_set_bool_param(&mut cinfo, JBOOLEAN_TRELLIS_QUANT_DC,
-            if config.trellis_dc { 1 } else { 0 });
-        jpeg_c_set_bool_param(&mut cinfo, JBOOLEAN_OVERSHOOT_DERINGING,
-            if config.overshoot_deringing { 1 } else { 0 });
+        jpeg_c_set_bool_param(
+            &mut cinfo,
+            JBOOLEAN_TRELLIS_QUANT,
+            if config.trellis_quant { 1 } else { 0 },
+        );
+        jpeg_c_set_bool_param(
+            &mut cinfo,
+            JBOOLEAN_TRELLIS_QUANT_DC,
+            if config.trellis_dc { 1 } else { 0 },
+        );
+        jpeg_c_set_bool_param(
+            &mut cinfo,
+            JBOOLEAN_OVERSHOOT_DERINGING,
+            if config.overshoot_deringing { 1 } else { 0 },
+        );
 
         jpeg_start_compress(&mut cinfo, 1);
 
@@ -126,8 +140,10 @@ fn final_quality_sweep() {
     for (width, height) in sizes {
         let image = create_photo_image(width, height);
         println!("--- Image {}x{} ---", width, height);
-        println!("{:>5} {:>10} {:>10} {:>8} {:>10} {:>10} {:>8}",
-                 "Q", "Rust", "C", "Ratio", "R-Ent", "C-Ent", "E-Ratio");
+        println!(
+            "{:>5} {:>10} {:>10} {:>8} {:>10} {:>10} {:>8}",
+            "Q", "Rust", "C", "Ratio", "R-Ent", "C-Ent", "E-Ratio"
+        );
 
         for quality in qualities.iter().copied() {
             let config = TestEncoderConfig {
@@ -144,14 +160,16 @@ fn final_quality_sweep() {
             let c_entropy = count_entropy_bytes(&c_jpeg);
             let entropy_ratio = rust_entropy as f64 / c_entropy.max(1) as f64;
 
-            println!("{:>5} {:>10} {:>10} {:>8.2}% {:>10} {:>10} {:>8.2}%",
-                     quality,
-                     rust_jpeg.len(),
-                     c_jpeg.len(),
-                     ratio * 100.0,
-                     rust_entropy,
-                     c_entropy,
-                     entropy_ratio * 100.0);
+            println!(
+                "{:>5} {:>10} {:>10} {:>8.2}% {:>10} {:>10} {:>8.2}%",
+                quality,
+                rust_jpeg.len(),
+                c_jpeg.len(),
+                ratio * 100.0,
+                rust_entropy,
+                c_entropy,
+                entropy_ratio * 100.0
+            );
 
             // Assert parity
             if ratio > 1.05 || ratio < 0.95 {
@@ -175,8 +193,7 @@ fn compare_with_baseline_no_huffman_opt() {
 
         for &quality in qualities.iter() {
             // Pure baseline - no Huffman optimization
-            let config = TestEncoderConfig::baseline()
-                .with_quality(quality);
+            let config = TestEncoderConfig::baseline().with_quality(quality);
 
             let rust_jpeg = encode_rust(&image, width as u32, height as u32, &config);
             let c_jpeg = encode_c_with_config(&image, width as u32, height as u32, &config);
@@ -185,11 +202,19 @@ fn compare_with_baseline_no_huffman_opt() {
             let rust_entropy = count_entropy_bytes(&rust_jpeg);
             let c_entropy = count_entropy_bytes(&c_jpeg);
 
-            println!("Q{}: Rust={} C={} ({:.2}%)",
-                     quality, rust_jpeg.len(), c_jpeg.len(), ratio * 100.0);
-            println!("     Entropy: Rust={} C={} ({:.2}%)",
-                     rust_entropy, c_entropy,
-                     rust_entropy as f64 / c_entropy.max(1) as f64 * 100.0);
+            println!(
+                "Q{}: Rust={} C={} ({:.2}%)",
+                quality,
+                rust_jpeg.len(),
+                c_jpeg.len(),
+                ratio * 100.0
+            );
+            println!(
+                "     Entropy: Rust={} C={} ({:.2}%)",
+                rust_entropy,
+                c_entropy,
+                rust_entropy as f64 / c_entropy.max(1) as f64 * 100.0
+            );
 
             // With identical settings and no Huffman opt, entropy should be identical
             if rust_entropy != c_entropy {
@@ -242,15 +267,24 @@ fn compare_decoded_pixels_q95() {
 
     println!("Rust JPEG: {} bytes", rust_jpeg.len());
     println!("C JPEG:    {} bytes", c_jpeg.len());
-    println!("Ratio:     {:.2}%", rust_jpeg.len() as f64 / c_jpeg.len() as f64 * 100.0);
+    println!(
+        "Ratio:     {:.2}%",
+        rust_jpeg.len() as f64 / c_jpeg.len() as f64 * 100.0
+    );
     println!();
     println!("Decoded pixel comparison:");
     println!("  Max diff:     {}", max_diff);
     println!("  Total pixels: {}", rust_pixels.len());
-    println!("  Diff count:   {} ({:.2}%)", diff_count,
-             diff_count as f64 / rust_pixels.len() as f64 * 100.0);
+    println!(
+        "  Diff count:   {} ({:.2}%)",
+        diff_count,
+        diff_count as f64 / rust_pixels.len() as f64 * 100.0
+    );
     if diff_count > 0 {
-        println!("  Avg diff:     {:.2}", total_diff as f64 / diff_count as f64);
+        println!(
+            "  Avg diff:     {:.2}",
+            total_diff as f64 / diff_count as f64
+        );
     }
 
     // If pixels are identical, the difference is purely Huffman efficiency
@@ -274,8 +308,10 @@ fn comprehensive_quality_sweep() {
 
     println!("Image: {}x{}", width, height);
     println!("Config: baseline + Huffman optimization\n");
-    println!("{:>5} {:>10} {:>10} {:>8} {:>8} {:>10}",
-             "Q", "Rust", "C", "Ratio", "MaxDiff", "Status");
+    println!(
+        "{:>5} {:>10} {:>10} {:>8} {:>8} {:>10}",
+        "Q", "Rust", "C", "Ratio", "MaxDiff", "Status"
+    );
     println!("{}", "-".repeat(60));
 
     let mut first_divergence = None;
@@ -297,13 +333,18 @@ fn comprehensive_quality_sweep() {
 
         // Decode and compare pixels
         let rust_pixels = jpeg_decoder::Decoder::new(std::io::Cursor::new(&rust_jpeg))
-            .decode().expect("Rust decode failed");
+            .decode()
+            .expect("Rust decode failed");
         let c_pixels = jpeg_decoder::Decoder::new(std::io::Cursor::new(&c_jpeg))
-            .decode().expect("C decode failed");
+            .decode()
+            .expect("C decode failed");
 
-        let max_diff: i32 = rust_pixels.iter().zip(c_pixels.iter())
+        let max_diff: i32 = rust_pixels
+            .iter()
+            .zip(c_pixels.iter())
             .map(|(&r, &c)| (r as i32 - c as i32).abs())
-            .max().unwrap_or(0);
+            .max()
+            .unwrap_or(0);
 
         let status = if ratio > 1.10 {
             "FAIL >10%"
@@ -317,13 +358,15 @@ fn comprehensive_quality_sweep() {
 
         // Only print notable results to avoid spam
         if quality <= 10 || quality >= 85 || quality % 10 == 0 || status != "OK" {
-            println!("{:>5} {:>10} {:>10} {:>8.2}% {:>8} {:>10}",
-                     quality,
-                     rust_jpeg.len(),
-                     c_jpeg.len(),
-                     ratio * 100.0,
-                     max_diff,
-                     status);
+            println!(
+                "{:>5} {:>10} {:>10} {:>8.2}% {:>8} {:>10}",
+                quality,
+                rust_jpeg.len(),
+                c_jpeg.len(),
+                ratio * 100.0,
+                max_diff,
+                status
+            );
         }
 
         // Track first divergence
@@ -345,7 +388,11 @@ fn comprehensive_quality_sweep() {
     } else {
         println!("  No pixel differences found!");
     }
-    println!("  Worst size ratio: {:.2}% at Q{}", worst_ratio * 100.0, worst_quality);
+    println!(
+        "  Worst size ratio: {:.2}% at Q{}",
+        worst_ratio * 100.0,
+        worst_quality
+    );
 }
 
 /// Fine-grained analysis around the divergence point
@@ -358,8 +405,10 @@ fn analyze_high_quality_divergence() {
     let image = create_photo_image(width as usize, height as usize);
 
     println!("Image: {}x{}", width, height);
-    println!("{:>5} {:>10} {:>10} {:>8} {:>8} {:>8} {:>10}",
-             "Q", "Rust", "C", "Ratio", "MaxDiff", "DiffPct", "Entropy%");
+    println!(
+        "{:>5} {:>10} {:>10} {:>8} {:>8} {:>8} {:>10}",
+        "Q", "Rust", "C", "Ratio", "MaxDiff", "DiffPct", "Entropy%"
+    );
     println!("{}", "-".repeat(75));
 
     for quality in 80..=100u8 {
@@ -379,27 +428,35 @@ fn analyze_high_quality_divergence() {
 
         // Decode and compare
         let rust_pixels = jpeg_decoder::Decoder::new(std::io::Cursor::new(&rust_jpeg))
-            .decode().expect("Rust decode failed");
+            .decode()
+            .expect("Rust decode failed");
         let c_pixels = jpeg_decoder::Decoder::new(std::io::Cursor::new(&c_jpeg))
-            .decode().expect("C decode failed");
+            .decode()
+            .expect("C decode failed");
 
         let mut max_diff = 0i32;
         let mut diff_count = 0usize;
         for (&r, &c) in rust_pixels.iter().zip(c_pixels.iter()) {
             let d = (r as i32 - c as i32).abs();
-            if d > 0 { diff_count += 1; }
-            if d > max_diff { max_diff = d; }
+            if d > 0 {
+                diff_count += 1;
+            }
+            if d > max_diff {
+                max_diff = d;
+            }
         }
         let diff_pct = diff_count as f64 / rust_pixels.len() as f64 * 100.0;
 
-        println!("{:>5} {:>10} {:>10} {:>8.2}% {:>8} {:>7.1}% {:>9.2}%",
-                 quality,
-                 rust_jpeg.len(),
-                 c_jpeg.len(),
-                 ratio * 100.0,
-                 max_diff,
-                 diff_pct,
-                 entropy_ratio * 100.0);
+        println!(
+            "{:>5} {:>10} {:>10} {:>8.2}% {:>8} {:>7.1}% {:>9.2}%",
+            quality,
+            rust_jpeg.len(),
+            c_jpeg.len(),
+            ratio * 100.0,
+            max_diff,
+            diff_pct,
+            entropy_ratio * 100.0
+        );
     }
 }
 
@@ -408,13 +465,22 @@ fn analyze_high_quality_divergence() {
 fn analyze_size_scaling() {
     println!("\n=== Size Scaling Analysis at Various Quality Levels ===\n");
 
-    let sizes = [(16, 16), (32, 32), (64, 64), (128, 128), (256, 256), (512, 512)];
+    let sizes = [
+        (16, 16),
+        (32, 32),
+        (64, 64),
+        (128, 128),
+        (256, 256),
+        (512, 512),
+    ];
     let qualities = [75, 85, 90, 95, 98];
 
     for quality in qualities {
         println!("--- Quality {} ---", quality);
-        println!("{:>10} {:>10} {:>10} {:>8} {:>8}",
-                 "Size", "Rust", "C", "Ratio", "MaxDiff");
+        println!(
+            "{:>10} {:>10} {:>10} {:>8} {:>8}",
+            "Size", "Rust", "C", "Ratio", "MaxDiff"
+        );
 
         for (width, height) in sizes {
             let image = create_photo_image(width, height);
@@ -432,20 +498,27 @@ fn analyze_size_scaling() {
 
             // Decode and compare
             let rust_pixels = jpeg_decoder::Decoder::new(std::io::Cursor::new(&rust_jpeg))
-                .decode().expect("Rust decode failed");
+                .decode()
+                .expect("Rust decode failed");
             let c_pixels = jpeg_decoder::Decoder::new(std::io::Cursor::new(&c_jpeg))
-                .decode().expect("C decode failed");
+                .decode()
+                .expect("C decode failed");
 
-            let max_diff: i32 = rust_pixels.iter().zip(c_pixels.iter())
+            let max_diff: i32 = rust_pixels
+                .iter()
+                .zip(c_pixels.iter())
                 .map(|(&r, &c)| (r as i32 - c as i32).abs())
-                .max().unwrap_or(0);
+                .max()
+                .unwrap_or(0);
 
-            println!("{:>10} {:>10} {:>10} {:>8.2}% {:>8}",
-                     format!("{}x{}", width, height),
-                     rust_jpeg.len(),
-                     c_jpeg.len(),
-                     ratio * 100.0,
-                     max_diff);
+            println!(
+                "{:>10} {:>10} {:>10} {:>8.2}% {:>8}",
+                format!("{}x{}", width, height),
+                rust_jpeg.len(),
+                c_jpeg.len(),
+                ratio * 100.0,
+                max_diff
+            );
         }
         println!();
     }
@@ -535,8 +608,11 @@ fn compare_marker_structure() {
         *c_by_type.entry(*marker).or_insert(0) += size;
     }
 
-    let all_markers: std::collections::HashSet<u8> =
-        rust_by_type.keys().chain(c_by_type.keys()).copied().collect();
+    let all_markers: std::collections::HashSet<u8> = rust_by_type
+        .keys()
+        .chain(c_by_type.keys())
+        .copied()
+        .collect();
     let mut sorted_markers: Vec<_> = all_markers.into_iter().collect();
     sorted_markers.sort();
 
@@ -555,7 +631,10 @@ fn compare_marker_structure() {
             _ => "OTHER",
         };
         if diff != 0 {
-            println!("FF{:02X} {:5}: Rust={:>4}, C={:>4}, diff={:+}", marker, name, r, c, diff);
+            println!(
+                "FF{:02X} {:5}: Rust={:>4}, C={:>4}, diff={:+}",
+                marker, name, r, c, diff
+            );
         }
     }
 }
@@ -590,7 +669,10 @@ fn test_minimal_8x8_block() {
     println!("8x8 block at Q95:");
     println!("  Rust: {} bytes", rust_jpeg.len());
     println!("  C:    {} bytes", c_jpeg.len());
-    println!("  Ratio: {:.2}%", rust_jpeg.len() as f64 / c_jpeg.len() as f64 * 100.0);
+    println!(
+        "  Ratio: {:.2}%",
+        rust_jpeg.len() as f64 / c_jpeg.len() as f64 * 100.0
+    );
 
     // Decode and compare
     let mut rust_dec = jpeg_decoder::Decoder::new(std::io::Cursor::new(&rust_jpeg));
@@ -606,7 +688,9 @@ fn test_minimal_8x8_block() {
     let mut max_diff = 0i32;
     for (&r, &c) in rust_pixels.iter().zip(c_pixels.iter()) {
         let d = (r as i32 - c as i32).abs();
-        if d > max_diff { max_diff = d; }
+        if d > max_diff {
+            max_diff = d;
+        }
     }
     println!("\nMax pixel diff: {}", max_diff);
 

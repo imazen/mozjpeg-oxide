@@ -7,11 +7,7 @@
 //!
 //! Reference: mozjpeg/jcparam.c
 
-use crate::consts::{
-    DCTSIZE2,
-    STD_LUMINANCE_QUANT_TBL, STD_CHROMINANCE_QUANT_TBL,
-    QuantTableIdx,
-};
+use crate::consts::{QuantTableIdx, DCTSIZE2, STD_CHROMINANCE_QUANT_TBL, STD_LUMINANCE_QUANT_TBL};
 use crate::types::QuantTable;
 
 /// Convert a quality value (1-100) to a scaling factor.
@@ -86,11 +82,7 @@ pub fn get_chrominance_quant_table(idx: QuantTableIdx) -> &'static [u16; DCTSIZE
 ///
 /// # Returns
 /// Scaled quantization table
-pub fn create_quant_table(
-    base: &[u16; DCTSIZE2],
-    quality: u8,
-    force_baseline: bool,
-) -> QuantTable {
+pub fn create_quant_table(base: &[u16; DCTSIZE2], quality: u8, force_baseline: bool) -> QuantTable {
     let scale = quality_to_scale_factor(quality);
     QuantTable::scaled(base, scale, force_baseline)
 }
@@ -160,7 +152,11 @@ pub fn dequantize_coef(qcoef: i16, quant: u16) -> i32 {
 /// * `coeffs` - Input DCT coefficients (64 values)
 /// * `quant_table` - Quantization table (64 values)
 /// * `output` - Output quantized coefficients (64 values)
-pub fn quantize_block(coeffs: &[i32; DCTSIZE2], quant_table: &[u16; DCTSIZE2], output: &mut [i16; DCTSIZE2]) {
+pub fn quantize_block(
+    coeffs: &[i32; DCTSIZE2],
+    quant_table: &[u16; DCTSIZE2],
+    output: &mut [i16; DCTSIZE2],
+) {
     for i in 0..DCTSIZE2 {
         output[i] = quantize_coef(coeffs[i], quant_table[i]);
     }
@@ -172,7 +168,11 @@ pub fn quantize_block(coeffs: &[i32; DCTSIZE2], quant_table: &[u16; DCTSIZE2], o
 /// * `qcoeffs` - Input quantized coefficients (64 values)
 /// * `quant_table` - Quantization table (64 values)
 /// * `output` - Output dequantized coefficients (64 values)
-pub fn dequantize_block(qcoeffs: &[i16; DCTSIZE2], quant_table: &[u16; DCTSIZE2], output: &mut [i32; DCTSIZE2]) {
+pub fn dequantize_block(
+    qcoeffs: &[i16; DCTSIZE2],
+    quant_table: &[u16; DCTSIZE2],
+    output: &mut [i32; DCTSIZE2],
+) {
     for i in 0..DCTSIZE2 {
         output[i] = dequantize_coef(qcoeffs[i], quant_table[i]);
     }
@@ -187,8 +187,8 @@ mod tests {
     fn test_quality_scaling_matches_mozjpeg() {
         // These values match mozjpeg's jpeg_quality_scaling exactly
         assert_eq!(quality_to_scale_factor(50), 100); // Q50 = 100%
-        assert_eq!(quality_to_scale_factor(75), 50);  // Q75 = 50%
-        assert_eq!(quality_to_scale_factor(100), 0);  // Q100 = 0%
+        assert_eq!(quality_to_scale_factor(75), 50); // Q75 = 50%
+        assert_eq!(quality_to_scale_factor(100), 0); // Q100 = 0%
         assert_eq!(quality_to_scale_factor(25), 200); // Q25 = 200%
         assert_eq!(quality_to_scale_factor(1), 5000); // Q1 = 5000%
         assert_eq!(quality_to_scale_factor(10), 500); // Q10 = 500%
@@ -264,9 +264,9 @@ mod tests {
     #[test]
     fn test_quantize_rounding() {
         // Positive rounding
-        assert_eq!(quantize_coef(14, 10), 1);  // 14/10 rounds to 1
-        assert_eq!(quantize_coef(15, 10), 2);  // 15/10 rounds to 2 (round half up)
-        assert_eq!(quantize_coef(16, 10), 2);  // 16/10 rounds to 2
+        assert_eq!(quantize_coef(14, 10), 1); // 14/10 rounds to 1
+        assert_eq!(quantize_coef(15, 10), 2); // 15/10 rounds to 2 (round half up)
+        assert_eq!(quantize_coef(16, 10), 2); // 16/10 rounds to 2
 
         // Negative rounding
         assert_eq!(quantize_coef(-14, 10), -1);
@@ -277,8 +277,8 @@ mod tests {
     #[test]
     fn test_quantize_block() {
         let mut coeffs = [0i32; DCTSIZE2];
-        coeffs[0] = 1000;  // DC
-        coeffs[1] = 100;   // AC
+        coeffs[0] = 1000; // DC
+        coeffs[1] = 100; // AC
         coeffs[63] = -50;
 
         let quant = [10u16; DCTSIZE2];

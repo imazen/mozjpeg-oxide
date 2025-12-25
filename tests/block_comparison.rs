@@ -65,15 +65,27 @@ fn test_baseline_vs_progressive_small() {
 
     // Both should have reasonable quality
     assert!(base_psnr > 30.0, "Baseline PSNR too low: {:.2}", base_psnr);
-    assert!(prog_psnr > 30.0, "Progressive PSNR too low: {:.2}", prog_psnr);
+    assert!(
+        prog_psnr > 30.0,
+        "Progressive PSNR too low: {:.2}",
+        prog_psnr
+    );
 
     // DSSIM perceptual quality check
     let base_dssim = calculate_dssim(&rgb_data, &base_dec, width, height);
     let prog_dssim = calculate_dssim(&rgb_data, &prog_dec, width, height);
     println!("Baseline DSSIM:    {:.6}", base_dssim);
     println!("Progressive DSSIM: {:.6}", prog_dssim);
-    assert!(base_dssim < 0.003, "Baseline DSSIM too high: {:.6}", base_dssim);
-    assert!(prog_dssim < 0.003, "Progressive DSSIM too high: {:.6}", prog_dssim);
+    assert!(
+        base_dssim < 0.003,
+        "Baseline DSSIM too high: {:.6}",
+        base_dssim
+    );
+    assert!(
+        prog_dssim < 0.003,
+        "Progressive DSSIM too high: {:.6}",
+        prog_dssim
+    );
 
     // Check decoded data similarity
     if base_dec == prog_dec {
@@ -176,8 +188,16 @@ fn test_baseline_vs_progressive_420() {
     let prog_dssim = calculate_dssim(&rgb_data, &prog_dec, width, height);
     println!("Baseline DSSIM:    {:.6}", base_dssim);
     println!("Progressive DSSIM: {:.6}", prog_dssim);
-    assert!(base_dssim < 0.003, "Baseline DSSIM too high: {:.6}", base_dssim);
-    assert!(prog_dssim < 0.003, "Progressive DSSIM too high: {:.6}", prog_dssim);
+    assert!(
+        base_dssim < 0.003,
+        "Baseline DSSIM too high: {:.6}",
+        base_dssim
+    );
+    assert!(
+        prog_dssim < 0.003,
+        "Progressive DSSIM too high: {:.6}",
+        prog_dssim
+    );
 
     // Count scans in progressive
     let base_scans = baseline.windows(2).filter(|w| *w == [0xFF, 0xDA]).count();

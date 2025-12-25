@@ -14,8 +14,8 @@
 use std::io::Write;
 
 use crate::consts::{
-    DCTSIZE2, JPEG_DHT, JPEG_DQT, JPEG_EOI, JPEG_SOF0, JPEG_SOF2, JPEG_SOI, JPEG_SOS,
-    JPEG_APP0, JPEG_RST0,
+    DCTSIZE2, JPEG_APP0, JPEG_DHT, JPEG_DQT, JPEG_EOI, JPEG_RST0, JPEG_SOF0, JPEG_SOF2, JPEG_SOI,
+    JPEG_SOS,
 };
 use crate::huffman::HuffTable;
 use crate::types::{ComponentInfo, ScanInfo};
@@ -245,10 +245,7 @@ impl<W: Write> MarkerWriter<W> {
     ///
     /// # Arguments
     /// * `tables` - Slice of (table_index, is_ac, table)
-    pub fn write_dht_multiple(
-        &mut self,
-        tables: &[(u8, bool, &HuffTable)],
-    ) -> std::io::Result<()> {
+    pub fn write_dht_multiple(&mut self, tables: &[(u8, bool, &HuffTable)]) -> std::io::Result<()> {
         if tables.is_empty() {
             return Ok(());
         }
@@ -641,7 +638,7 @@ mod tests {
         // Check number of components
         assert_eq!(output[4], 3);
         // Check spectral selection
-        assert_eq!(output[11], 0);  // Ss
+        assert_eq!(output[11], 0); // Ss
         assert_eq!(output[12], 63); // Se
     }
 

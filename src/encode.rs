@@ -19,26 +19,22 @@ use std::io::Write;
 use crate::bitstream::BitWriter;
 use crate::color;
 use crate::consts::{
-    QuantTableIdx, DCTSIZE, DCTSIZE2, JPEG_NATURAL_ORDER,
-    DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES,
-    DC_CHROMINANCE_BITS, DC_CHROMINANCE_VALUES,
-    AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES,
-    AC_CHROMINANCE_BITS, AC_CHROMINANCE_VALUES,
+    QuantTableIdx, AC_CHROMINANCE_BITS, AC_CHROMINANCE_VALUES, AC_LUMINANCE_BITS,
+    AC_LUMINANCE_VALUES, DCTSIZE, DCTSIZE2, DC_CHROMINANCE_BITS, DC_CHROMINANCE_VALUES,
+    DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES, JPEG_NATURAL_ORDER,
 };
 use crate::dct;
 use crate::entropy::{EntropyEncoder, ProgressiveEncoder, ProgressiveSymbolCounter, SymbolCounter};
-use crate::huffman::FrequencyCounter;
 use crate::error::{Error, Result};
+use crate::huffman::FrequencyCounter;
 use crate::huffman::{DerivedTable, HuffTable};
 use crate::marker::MarkerWriter;
 use crate::progressive::{generate_baseline_scan, generate_minimal_progressive_scans};
-use crate::scan_optimize::{generate_search_scans, ScanSearchConfig, ScanSelector};
 use crate::quant::{create_quant_tables, quantize_block};
-use crate::trellis::{trellis_quantize_block, dc_trellis_optimize_indexed};
 use crate::sample;
-use crate::types::{
-    ComponentInfo, Subsampling, TrellisConfig,
-};
+use crate::scan_optimize::{generate_search_scans, ScanSearchConfig, ScanSelector};
+use crate::trellis::{dc_trellis_optimize_indexed, trellis_quantize_block};
+use crate::types::{ComponentInfo, Subsampling, TrellisConfig};
 
 /// Helper to allocate a Vec with fallible allocation.
 /// Returns Error::AllocationFailed if allocation fails.
@@ -259,7 +255,7 @@ impl Encoder {
     /// * `height` - Image height in pixels
     ///
     /// # Returns
-    /// JPEG-encoded data as a Vec<u8>
+    /// JPEG-encoded data as a `Vec<u8>`.
     pub fn encode_rgb(&self, rgb_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
         // Validate dimensions: must be non-zero
         if width == 0 || height == 0 {
@@ -292,7 +288,7 @@ impl Encoder {
     /// * `height` - Image height in pixels
     ///
     /// # Returns
-    /// JPEG-encoded data as a Vec<u8>
+    /// JPEG-encoded data as a `Vec<u8>`.
     pub fn encode_gray(&self, gray_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
         // Validate dimensions: must be non-zero
         if width == 0 || height == 0 {
@@ -340,11 +336,8 @@ impl Encoder {
         sample::expand_to_mcu(y_plane, width, height, &mut y_mcu, mcu_width, mcu_height);
 
         // Create quantization table (only luma needed)
-        let (luma_qtable, _) = create_quant_tables(
-            self.quality,
-            self.quant_table_idx,
-            self.force_baseline,
-        );
+        let (luma_qtable, _) =
+            create_quant_tables(self.quality, self.quant_table_idx, self.force_baseline);
 
         // Create Huffman tables (only luma needed)
         let dc_luma_huff = create_std_dc_luma_table();
@@ -389,10 +382,8 @@ impl Encoder {
 
         // DHT (only luma tables for grayscale)
         if !self.optimize_huffman {
-            marker_writer.write_dht_multiple(&[
-                (0, false, &dc_luma_huff),
-                (0, true, &ac_luma_huff),
-            ])?;
+            marker_writer
+                .write_dht_multiple(&[(0, false, &dc_luma_huff), (0, true, &ac_luma_huff)])?;
         }
 
         // Grayscale uses baseline encoding
@@ -440,10 +431,8 @@ impl Encoder {
             let opt_ac_derived = DerivedTable::from_huff_table(&opt_ac_huff, false)?;
 
             // Write optimized Huffman tables
-            marker_writer.write_dht_multiple(&[
-                (0, false, &opt_dc_huff),
-                (0, true, &opt_ac_huff),
-            ])?;
+            marker_writer
+                .write_dht_multiple(&[(0, false, &opt_dc_huff), (0, true, &opt_ac_huff)])?;
 
             // Write SOS and encode
             let scans = generate_baseline_scan(1);
@@ -533,9 +522,10 @@ impl Encoder {
 
         // Step 1: Convert RGB to YCbCr
         // Use checked arithmetic for num_pixels calculation
-        let num_pixels = width
-            .checked_mul(height)
-            .ok_or(Error::InvalidDimensions { width: width as u32, height: height as u32 })?;
+        let num_pixels = width.checked_mul(height).ok_or(Error::InvalidDimensions {
+            width: width as u32,
+            height: height as u32,
+        })?;
 
         let mut y_plane = try_alloc_vec(0u8, num_pixels)?;
         let mut cb_plane = try_alloc_vec(0u8, num_pixels)?;
@@ -552,10 +542,8 @@ impl Encoder {
 
         // Step 2: Downsample chroma if needed
         let (luma_h, luma_v) = self.subsampling.luma_factors();
-        let (chroma_width, chroma_height) = sample::subsampled_dimensions(
-            width, height,
-            luma_h as usize, luma_v as usize,
-        );
+        let (chroma_width, chroma_height) =
+            sample::subsampled_dimensions(width, height, luma_h as usize, luma_v as usize);
 
         let chroma_size = chroma_width
             .checked_mul(chroma_height)
@@ -564,22 +552,27 @@ impl Encoder {
         let mut cr_subsampled = try_alloc_vec(0u8, chroma_size)?;
 
         sample::downsample_plane(
-            &cb_plane, width, height,
-            luma_h as usize, luma_v as usize,
+            &cb_plane,
+            width,
+            height,
+            luma_h as usize,
+            luma_v as usize,
             &mut cb_subsampled,
         );
         sample::downsample_plane(
-            &cr_plane, width, height,
-            luma_h as usize, luma_v as usize,
+            &cr_plane,
+            width,
+            height,
+            luma_h as usize,
+            luma_v as usize,
             &mut cr_subsampled,
         );
 
         // Step 3: Expand planes to MCU-aligned dimensions
-        let (mcu_width, mcu_height) = sample::mcu_aligned_dimensions(
-            width, height,
-            luma_h as usize, luma_v as usize,
-        );
-        let (mcu_chroma_w, mcu_chroma_h) = (mcu_width / luma_h as usize, mcu_height / luma_v as usize);
+        let (mcu_width, mcu_height) =
+            sample::mcu_aligned_dimensions(width, height, luma_h as usize, luma_v as usize);
+        let (mcu_chroma_w, mcu_chroma_h) =
+            (mcu_width / luma_h as usize, mcu_height / luma_v as usize);
 
         let mcu_y_size = mcu_width
             .checked_mul(mcu_height)
@@ -592,15 +585,26 @@ impl Encoder {
         let mut cr_mcu = try_alloc_vec(0u8, mcu_chroma_size)?;
 
         sample::expand_to_mcu(&y_plane, width, height, &mut y_mcu, mcu_width, mcu_height);
-        sample::expand_to_mcu(&cb_subsampled, chroma_width, chroma_height, &mut cb_mcu, mcu_chroma_w, mcu_chroma_h);
-        sample::expand_to_mcu(&cr_subsampled, chroma_width, chroma_height, &mut cr_mcu, mcu_chroma_w, mcu_chroma_h);
+        sample::expand_to_mcu(
+            &cb_subsampled,
+            chroma_width,
+            chroma_height,
+            &mut cb_mcu,
+            mcu_chroma_w,
+            mcu_chroma_h,
+        );
+        sample::expand_to_mcu(
+            &cr_subsampled,
+            chroma_width,
+            chroma_height,
+            &mut cr_mcu,
+            mcu_chroma_w,
+            mcu_chroma_h,
+        );
 
         // Step 4: Create quantization tables
-        let (luma_qtable, chroma_qtable) = create_quant_tables(
-            self.quality,
-            self.quant_table_idx,
-            self.force_baseline,
-        );
+        let (luma_qtable, chroma_qtable) =
+            create_quant_tables(self.quality, self.quant_table_idx, self.force_baseline);
 
         // Step 5: Create Huffman tables (standard tables)
         let dc_luma_huff = create_std_dc_luma_table();
@@ -633,10 +637,8 @@ impl Encoder {
         // DQT (quantization tables in zigzag order) - combined into single marker
         let luma_qtable_zz = natural_to_zigzag(&luma_qtable.values);
         let chroma_qtable_zz = natural_to_zigzag(&chroma_qtable.values);
-        marker_writer.write_dqt_multiple(&[
-            (0, &luma_qtable_zz, false),
-            (1, &chroma_qtable_zz, false),
-        ])?;
+        marker_writer
+            .write_dqt_multiple(&[(0, &luma_qtable_zz, false), (1, &chroma_qtable_zz, false)])?;
 
         // SOF
         marker_writer.write_sof(
@@ -701,13 +703,25 @@ impl Encoder {
             };
 
             self.collect_blocks(
-                &y_mcu, mcu_width, mcu_height,
-                &cb_mcu, &cr_mcu, mcu_chroma_w, mcu_chroma_h,
-                &luma_qtable.values, &chroma_qtable.values,
-                &ac_luma_derived, &ac_chroma_derived,
-                &mut y_blocks, &mut cb_blocks, &mut cr_blocks,
-                y_raw_dct.as_deref_mut(), cb_raw_dct.as_deref_mut(), cr_raw_dct.as_deref_mut(),
-                luma_h, luma_v,
+                &y_mcu,
+                mcu_width,
+                mcu_height,
+                &cb_mcu,
+                &cr_mcu,
+                mcu_chroma_w,
+                mcu_chroma_h,
+                &luma_qtable.values,
+                &chroma_qtable.values,
+                &ac_luma_derived,
+                &ac_chroma_derived,
+                &mut y_blocks,
+                &mut cb_blocks,
+                &mut cr_blocks,
+                y_raw_dct.as_deref_mut(),
+                cb_raw_dct.as_deref_mut(),
+                cr_raw_dct.as_deref_mut(),
+                luma_h,
+                luma_v,
             )?;
 
             // Run DC trellis optimization if enabled
@@ -720,27 +734,48 @@ impl Encoder {
 
                 if let Some(ref y_raw) = y_raw_dct {
                     run_dc_trellis_by_row(
-                        y_raw, &mut y_blocks,
-                        luma_qtable.values[0], &dc_luma_derived,
-                        self.trellis.lambda_log_scale1, self.trellis.lambda_log_scale2,
-                        y_block_rows, y_block_cols, mcu_cols, h, v,
+                        y_raw,
+                        &mut y_blocks,
+                        luma_qtable.values[0],
+                        &dc_luma_derived,
+                        self.trellis.lambda_log_scale1,
+                        self.trellis.lambda_log_scale2,
+                        y_block_rows,
+                        y_block_cols,
+                        mcu_cols,
+                        h,
+                        v,
                     );
                 }
                 // Chroma has 1x1 per MCU, so MCU order = row order
                 if let Some(ref cb_raw) = cb_raw_dct {
                     run_dc_trellis_by_row(
-                        cb_raw, &mut cb_blocks,
-                        chroma_qtable.values[0], &dc_chroma_derived,
-                        self.trellis.lambda_log_scale1, self.trellis.lambda_log_scale2,
-                        mcu_rows, mcu_cols, mcu_cols, 1, 1,
+                        cb_raw,
+                        &mut cb_blocks,
+                        chroma_qtable.values[0],
+                        &dc_chroma_derived,
+                        self.trellis.lambda_log_scale1,
+                        self.trellis.lambda_log_scale2,
+                        mcu_rows,
+                        mcu_cols,
+                        mcu_cols,
+                        1,
+                        1,
                     );
                 }
                 if let Some(ref cr_raw) = cr_raw_dct {
                     run_dc_trellis_by_row(
-                        cr_raw, &mut cr_blocks,
-                        chroma_qtable.values[0], &dc_chroma_derived,
-                        self.trellis.lambda_log_scale1, self.trellis.lambda_log_scale2,
-                        mcu_rows, mcu_cols, mcu_cols, 1, 1,
+                        cr_raw,
+                        &mut cr_blocks,
+                        chroma_qtable.values[0],
+                        &dc_chroma_derived,
+                        self.trellis.lambda_log_scale1,
+                        self.trellis.lambda_log_scale2,
+                        mcu_rows,
+                        mcu_cols,
+                        mcu_cols,
+                        1,
+                        1,
                     );
                 }
             }
@@ -754,13 +789,21 @@ impl Encoder {
                 // 4. Build final scan script from the selection
                 self.optimize_progressive_scans(
                     3, // num_components
-                    &y_blocks, &cb_blocks, &cr_blocks,
-                    mcu_rows, mcu_cols,
-                    luma_h, luma_v,
-                    width, height,
-                    chroma_width, chroma_height,
-                    &dc_luma_derived, &dc_chroma_derived,
-                    &ac_luma_derived, &ac_chroma_derived,
+                    &y_blocks,
+                    &cb_blocks,
+                    &cr_blocks,
+                    mcu_rows,
+                    mcu_cols,
+                    luma_h,
+                    luma_v,
+                    width,
+                    height,
+                    chroma_width,
+                    chroma_height,
+                    &dc_luma_derived,
+                    &dc_chroma_derived,
+                    &ac_luma_derived,
+                    &ac_chroma_derived,
                 )?
             } else {
                 // Use minimal (4 scans) to match C mozjpeg's jpeg_simple_progression()
@@ -768,7 +811,8 @@ impl Encoder {
             };
 
             // Count symbol frequencies for optimized Huffman tables
-            let (opt_dc_luma, opt_dc_chroma, opt_ac_luma, opt_ac_chroma) = if self.optimize_huffman {
+            let (opt_dc_luma, opt_dc_chroma, opt_ac_luma, opt_ac_chroma) = if self.optimize_huffman
+            {
                 let mut dc_luma_freq = FrequencyCounter::new();
                 let mut dc_chroma_freq = FrequencyCounter::new();
                 let mut ac_luma_freq = FrequencyCounter::new();
@@ -781,10 +825,15 @@ impl Encoder {
                         // DC scan - count DC symbols for all components
                         self.count_dc_scan_symbols(
                             scan,
-                            &y_blocks, &cb_blocks, &cr_blocks,
-                            mcu_rows, mcu_cols,
-                            luma_h, luma_v,
-                            &mut dc_luma_freq, &mut dc_chroma_freq,
+                            &y_blocks,
+                            &cb_blocks,
+                            &cr_blocks,
+                            mcu_rows,
+                            mcu_cols,
+                            luma_h,
+                            luma_v,
+                            &mut dc_luma_freq,
+                            &mut dc_chroma_freq,
                         );
                     } else {
                         // AC scan - count AC symbols for single component
@@ -795,18 +844,33 @@ impl Encoder {
                             2 => &cr_blocks,
                             _ => &y_blocks,
                         };
-                        let ac_freq = if comp_idx == 0 { &mut ac_luma_freq } else { &mut ac_chroma_freq };
+                        let ac_freq = if comp_idx == 0 {
+                            &mut ac_luma_freq
+                        } else {
+                            &mut ac_chroma_freq
+                        };
                         // Calculate actual block dimensions for this component
                         let (actual_block_cols, actual_block_rows) = if comp_idx == 0 {
-                            ((width + DCTSIZE - 1) / DCTSIZE, (height + DCTSIZE - 1) / DCTSIZE)
+                            (
+                                (width + DCTSIZE - 1) / DCTSIZE,
+                                (height + DCTSIZE - 1) / DCTSIZE,
+                            )
                         } else {
-                            ((chroma_width + DCTSIZE - 1) / DCTSIZE, (chroma_height + DCTSIZE - 1) / DCTSIZE)
+                            (
+                                (chroma_width + DCTSIZE - 1) / DCTSIZE,
+                                (chroma_height + DCTSIZE - 1) / DCTSIZE,
+                            )
                         };
                         self.count_ac_scan_symbols(
-                            scan, blocks,
-                            mcu_rows, mcu_cols,
-                            luma_h, luma_v, comp_idx,
-                            actual_block_cols, actual_block_rows,
+                            scan,
+                            blocks,
+                            mcu_rows,
+                            mcu_cols,
+                            luma_h,
+                            luma_v,
+                            comp_idx,
+                            actual_block_cols,
+                            actual_block_rows,
                             ac_freq,
                         );
                     }
@@ -835,8 +899,12 @@ impl Encoder {
                 )
             } else {
                 // Use standard tables (already written)
-                (dc_luma_derived.clone(), dc_chroma_derived.clone(),
-                 ac_luma_derived.clone(), ac_chroma_derived.clone())
+                (
+                    dc_luma_derived.clone(),
+                    dc_chroma_derived.clone(),
+                    ac_luma_derived.clone(),
+                    ac_chroma_derived.clone(),
+                )
             };
 
             // Get output writer from marker_writer
@@ -863,13 +931,21 @@ impl Encoder {
 
                 self.encode_progressive_scan(
                     scan,
-                    &y_blocks, &cb_blocks, &cr_blocks,
-                    mcu_rows, mcu_cols,
-                    luma_h, luma_v,
-                    width, height,
-                    chroma_width, chroma_height,
-                    &opt_dc_luma, &opt_dc_chroma,
-                    &opt_ac_luma, &opt_ac_chroma,
+                    &y_blocks,
+                    &cb_blocks,
+                    &cr_blocks,
+                    mcu_rows,
+                    mcu_cols,
+                    luma_h,
+                    luma_v,
+                    width,
+                    height,
+                    chroma_width,
+                    chroma_height,
+                    &opt_dc_luma,
+                    &opt_dc_chroma,
+                    &opt_ac_luma,
+                    &opt_ac_chroma,
                     &mut prog_encoder,
                 )?;
 
@@ -929,13 +1005,25 @@ impl Encoder {
             };
 
             self.collect_blocks(
-                &y_mcu, mcu_width, mcu_height,
-                &cb_mcu, &cr_mcu, mcu_chroma_w, mcu_chroma_h,
-                &luma_qtable.values, &chroma_qtable.values,
-                &ac_luma_derived, &ac_chroma_derived,
-                &mut y_blocks, &mut cb_blocks, &mut cr_blocks,
-                y_raw_dct.as_deref_mut(), cb_raw_dct.as_deref_mut(), cr_raw_dct.as_deref_mut(),
-                luma_h, luma_v,
+                &y_mcu,
+                mcu_width,
+                mcu_height,
+                &cb_mcu,
+                &cr_mcu,
+                mcu_chroma_w,
+                mcu_chroma_h,
+                &luma_qtable.values,
+                &chroma_qtable.values,
+                &ac_luma_derived,
+                &ac_chroma_derived,
+                &mut y_blocks,
+                &mut cb_blocks,
+                &mut cr_blocks,
+                y_raw_dct.as_deref_mut(),
+                cb_raw_dct.as_deref_mut(),
+                cr_raw_dct.as_deref_mut(),
+                luma_h,
+                luma_v,
             )?;
 
             // Run DC trellis optimization if enabled
@@ -948,27 +1036,48 @@ impl Encoder {
 
                 if let Some(ref y_raw) = y_raw_dct {
                     run_dc_trellis_by_row(
-                        y_raw, &mut y_blocks,
-                        luma_qtable.values[0], &dc_luma_derived,
-                        self.trellis.lambda_log_scale1, self.trellis.lambda_log_scale2,
-                        y_block_rows, y_block_cols, mcu_cols, h, v,
+                        y_raw,
+                        &mut y_blocks,
+                        luma_qtable.values[0],
+                        &dc_luma_derived,
+                        self.trellis.lambda_log_scale1,
+                        self.trellis.lambda_log_scale2,
+                        y_block_rows,
+                        y_block_cols,
+                        mcu_cols,
+                        h,
+                        v,
                     );
                 }
                 // Chroma has 1x1 per MCU, so MCU order = row order
                 if let Some(ref cb_raw) = cb_raw_dct {
                     run_dc_trellis_by_row(
-                        cb_raw, &mut cb_blocks,
-                        chroma_qtable.values[0], &dc_chroma_derived,
-                        self.trellis.lambda_log_scale1, self.trellis.lambda_log_scale2,
-                        mcu_rows, mcu_cols, mcu_cols, 1, 1,
+                        cb_raw,
+                        &mut cb_blocks,
+                        chroma_qtable.values[0],
+                        &dc_chroma_derived,
+                        self.trellis.lambda_log_scale1,
+                        self.trellis.lambda_log_scale2,
+                        mcu_rows,
+                        mcu_cols,
+                        mcu_cols,
+                        1,
+                        1,
                     );
                 }
                 if let Some(ref cr_raw) = cr_raw_dct {
                     run_dc_trellis_by_row(
-                        cr_raw, &mut cr_blocks,
-                        chroma_qtable.values[0], &dc_chroma_derived,
-                        self.trellis.lambda_log_scale1, self.trellis.lambda_log_scale2,
-                        mcu_rows, mcu_cols, mcu_cols, 1, 1,
+                        cr_raw,
+                        &mut cr_blocks,
+                        chroma_qtable.values[0],
+                        &dc_chroma_derived,
+                        self.trellis.lambda_log_scale1,
+                        self.trellis.lambda_log_scale2,
+                        mcu_rows,
+                        mcu_cols,
+                        mcu_cols,
+                        1,
+                        1,
                     );
                 }
             }
@@ -988,13 +1097,28 @@ impl Encoder {
                 for _mcu_col in 0..mcu_cols {
                     // Y blocks
                     for _ in 0..blocks_per_mcu_y {
-                        counter.count_block(&y_blocks[y_idx], 0, &mut dc_luma_freq, &mut ac_luma_freq);
+                        counter.count_block(
+                            &y_blocks[y_idx],
+                            0,
+                            &mut dc_luma_freq,
+                            &mut ac_luma_freq,
+                        );
                         y_idx += 1;
                     }
                     // Cb block
-                    counter.count_block(&cb_blocks[c_idx], 1, &mut dc_chroma_freq, &mut ac_chroma_freq);
+                    counter.count_block(
+                        &cb_blocks[c_idx],
+                        1,
+                        &mut dc_chroma_freq,
+                        &mut ac_chroma_freq,
+                    );
                     // Cr block
-                    counter.count_block(&cr_blocks[c_idx], 2, &mut dc_chroma_freq, &mut ac_chroma_freq);
+                    counter.count_block(
+                        &cr_blocks[c_idx],
+                        2,
+                        &mut dc_chroma_freq,
+                        &mut ac_chroma_freq,
+                    );
                     c_idx += 1;
                 }
             }
@@ -1071,13 +1195,22 @@ impl Encoder {
             let mut entropy = EntropyEncoder::new(&mut bit_writer);
 
             self.encode_mcus(
-                &y_mcu, mcu_width, mcu_height,
-                &cb_mcu, &cr_mcu, mcu_chroma_w, mcu_chroma_h,
-                &luma_qtable.values, &chroma_qtable.values,
-                &dc_luma_derived, &dc_chroma_derived,
-                &ac_luma_derived, &ac_chroma_derived,
+                &y_mcu,
+                mcu_width,
+                mcu_height,
+                &cb_mcu,
+                &cr_mcu,
+                mcu_chroma_w,
+                mcu_chroma_h,
+                &luma_qtable.values,
+                &chroma_qtable.values,
+                &dc_luma_derived,
+                &dc_chroma_derived,
+                &ac_luma_derived,
+                &ac_chroma_derived,
                 &mut entropy,
-                luma_h, luma_v,
+                luma_h,
+                luma_v,
             )?;
 
             // Flush bits and get output back
@@ -1095,9 +1228,13 @@ impl Encoder {
     #[allow(clippy::too_many_arguments)]
     fn encode_mcus<W: Write>(
         &self,
-        y_plane: &[u8], y_width: usize, y_height: usize,
-        cb_plane: &[u8], cr_plane: &[u8],
-        chroma_width: usize, _chroma_height: usize,
+        y_plane: &[u8],
+        y_width: usize,
+        y_height: usize,
+        cb_plane: &[u8],
+        cr_plane: &[u8],
+        chroma_width: usize,
+        _chroma_height: usize,
         luma_qtable: &[u16; DCTSIZE2],
         chroma_qtable: &[u16; DCTSIZE2],
         dc_luma: &DerivedTable,
@@ -1105,7 +1242,8 @@ impl Encoder {
         ac_luma: &DerivedTable,
         ac_chroma: &DerivedTable,
         entropy: &mut EntropyEncoder<W>,
-        h_samp: u8, v_samp: u8,
+        h_samp: u8,
+        v_samp: u8,
     ) -> Result<()> {
         let mcu_rows = y_height / (DCTSIZE * v_samp as usize);
         let mcu_cols = y_width / (DCTSIZE * h_samp as usize);
@@ -1135,10 +1273,13 @@ impl Encoder {
                         let block_col = mcu_col * h_samp as usize + h;
 
                         self.encode_block(
-                            y_plane, y_width,
-                            block_row, block_col,
+                            y_plane,
+                            y_width,
+                            block_row,
+                            block_col,
                             luma_qtable,
-                            dc_luma, ac_luma,
+                            dc_luma,
+                            ac_luma,
                             0, // Y component
                             entropy,
                             &mut dct_block,
@@ -1149,10 +1290,13 @@ impl Encoder {
 
                 // Encode Cb block
                 self.encode_block(
-                    cb_plane, chroma_width,
-                    mcu_row, mcu_col,
+                    cb_plane,
+                    chroma_width,
+                    mcu_row,
+                    mcu_col,
                     chroma_qtable,
-                    dc_chroma, ac_chroma,
+                    dc_chroma,
+                    ac_chroma,
                     1, // Cb component
                     entropy,
                     &mut dct_block,
@@ -1161,10 +1305,13 @@ impl Encoder {
 
                 // Encode Cr block
                 self.encode_block(
-                    cr_plane, chroma_width,
-                    mcu_row, mcu_col,
+                    cr_plane,
+                    chroma_width,
+                    mcu_row,
+                    mcu_col,
                     chroma_qtable,
-                    dc_chroma, ac_chroma,
+                    dc_chroma,
+                    ac_chroma,
                     2, // Cr component
                     entropy,
                     &mut dct_block,
@@ -1246,9 +1393,13 @@ impl Encoder {
     #[allow(clippy::too_many_arguments)]
     fn collect_blocks(
         &self,
-        y_plane: &[u8], y_width: usize, y_height: usize,
-        cb_plane: &[u8], cr_plane: &[u8],
-        chroma_width: usize, _chroma_height: usize,
+        y_plane: &[u8],
+        y_width: usize,
+        y_height: usize,
+        cb_plane: &[u8],
+        cr_plane: &[u8],
+        chroma_width: usize,
+        _chroma_height: usize,
         luma_qtable: &[u16; DCTSIZE2],
         chroma_qtable: &[u16; DCTSIZE2],
         ac_luma: &DerivedTable,
@@ -1259,7 +1410,8 @@ impl Encoder {
         mut y_raw_dct: Option<&mut [[i32; DCTSIZE2]]>,
         mut cb_raw_dct: Option<&mut [[i32; DCTSIZE2]]>,
         mut cr_raw_dct: Option<&mut [[i32; DCTSIZE2]]>,
-        h_samp: u8, v_samp: u8,
+        h_samp: u8,
+        v_samp: u8,
     ) -> Result<()> {
         let mcu_rows = y_height / (DCTSIZE * v_samp as usize);
         let mcu_cols = y_width / (DCTSIZE * h_samp as usize);
@@ -1279,8 +1431,10 @@ impl Encoder {
                         // Get mutable reference to raw DCT output if collecting
                         let raw_dct_out = y_raw_dct.as_mut().map(|arr| &mut arr[y_idx][..]);
                         self.process_block_to_storage_with_raw(
-                            y_plane, y_width,
-                            block_row, block_col,
+                            y_plane,
+                            y_width,
+                            block_row,
+                            block_col,
                             luma_qtable,
                             ac_luma,
                             &mut y_blocks[y_idx],
@@ -1294,8 +1448,10 @@ impl Encoder {
                 // Collect Cb block
                 let raw_dct_out = cb_raw_dct.as_mut().map(|arr| &mut arr[c_idx][..]);
                 self.process_block_to_storage_with_raw(
-                    cb_plane, chroma_width,
-                    mcu_row, mcu_col,
+                    cb_plane,
+                    chroma_width,
+                    mcu_row,
+                    mcu_col,
                     chroma_qtable,
                     ac_chroma,
                     &mut cb_blocks[c_idx],
@@ -1306,8 +1462,10 @@ impl Encoder {
                 // Collect Cr block
                 let raw_dct_out = cr_raw_dct.as_mut().map(|arr| &mut arr[c_idx][..]);
                 self.process_block_to_storage_with_raw(
-                    cr_plane, chroma_width,
-                    mcu_row, mcu_col,
+                    cr_plane,
+                    chroma_width,
+                    mcu_row,
+                    mcu_col,
                     chroma_qtable,
                     ac_chroma,
                     &mut cr_blocks[c_idx],
@@ -1399,7 +1557,8 @@ impl Encoder {
         cr_blocks: &[[i16; DCTSIZE2]],
         mcu_rows: usize,
         mcu_cols: usize,
-        h_samp: u8, v_samp: u8,
+        h_samp: u8,
+        v_samp: u8,
         actual_width: usize,
         actual_height: usize,
         chroma_width: usize,
@@ -1418,13 +1577,21 @@ impl Encoder {
         for scan in &candidate_scans {
             let size = self.trial_encode_scan(
                 scan,
-                y_blocks, cb_blocks, cr_blocks,
-                mcu_rows, mcu_cols,
-                h_samp, v_samp,
-                actual_width, actual_height,
-                chroma_width, chroma_height,
-                dc_luma, dc_chroma,
-                ac_luma, ac_chroma,
+                y_blocks,
+                cb_blocks,
+                cr_blocks,
+                mcu_rows,
+                mcu_cols,
+                h_samp,
+                v_samp,
+                actual_width,
+                actual_height,
+                chroma_width,
+                chroma_height,
+                dc_luma,
+                dc_chroma,
+                ac_luma,
+                ac_chroma,
             )?;
             scan_sizes.push(size);
         }
@@ -1447,7 +1614,8 @@ impl Encoder {
         cr_blocks: &[[i16; DCTSIZE2]],
         mcu_rows: usize,
         mcu_cols: usize,
-        h_samp: u8, v_samp: u8,
+        h_samp: u8,
+        v_samp: u8,
         actual_width: usize,
         actual_height: usize,
         chroma_width: usize,
@@ -1464,13 +1632,21 @@ impl Encoder {
         // Encode the scan
         self.encode_progressive_scan(
             scan,
-            y_blocks, cb_blocks, cr_blocks,
-            mcu_rows, mcu_cols,
-            h_samp, v_samp,
-            actual_width, actual_height,
-            chroma_width, chroma_height,
-            dc_luma, dc_chroma,
-            ac_luma, ac_chroma,
+            y_blocks,
+            cb_blocks,
+            cr_blocks,
+            mcu_rows,
+            mcu_cols,
+            h_samp,
+            v_samp,
+            actual_width,
+            actual_height,
+            chroma_width,
+            chroma_height,
+            dc_luma,
+            dc_chroma,
+            ac_luma,
+            ac_chroma,
             &mut prog_encoder,
         )?;
 
@@ -1500,7 +1676,8 @@ impl Encoder {
         cr_blocks: &[[i16; DCTSIZE2]],
         mcu_rows: usize,
         mcu_cols: usize,
-        h_samp: u8, v_samp: u8,
+        h_samp: u8,
+        v_samp: u8,
         actual_width: usize,
         actual_height: usize,
         chroma_width: usize,
@@ -1517,9 +1694,16 @@ impl Encoder {
         if is_dc_scan {
             // DC scan - can be interleaved (multiple components)
             self.encode_dc_scan(
-                scan, y_blocks, cb_blocks, cr_blocks,
-                mcu_rows, mcu_cols, h_samp, v_samp,
-                dc_luma, dc_chroma,
+                scan,
+                y_blocks,
+                cb_blocks,
+                cr_blocks,
+                mcu_rows,
+                mcu_cols,
+                h_samp,
+                v_samp,
+                dc_luma,
+                dc_chroma,
                 is_refinement,
                 encoder,
             )?;
@@ -1538,16 +1722,28 @@ impl Encoder {
             // Calculate actual block dimensions for this component
             let (actual_block_cols, actual_block_rows) = if comp_idx == 0 {
                 // Y component: full resolution
-                ((actual_width + DCTSIZE - 1) / DCTSIZE, (actual_height + DCTSIZE - 1) / DCTSIZE)
+                (
+                    (actual_width + DCTSIZE - 1) / DCTSIZE,
+                    (actual_height + DCTSIZE - 1) / DCTSIZE,
+                )
             } else {
                 // Chroma components: subsampled resolution
-                ((chroma_width + DCTSIZE - 1) / DCTSIZE, (chroma_height + DCTSIZE - 1) / DCTSIZE)
+                (
+                    (chroma_width + DCTSIZE - 1) / DCTSIZE,
+                    (chroma_height + DCTSIZE - 1) / DCTSIZE,
+                )
             };
 
             self.encode_ac_scan(
-                scan, blocks,
-                mcu_rows, mcu_cols, h_samp, v_samp, comp_idx,
-                actual_block_cols, actual_block_rows,
+                scan,
+                blocks,
+                mcu_rows,
+                mcu_cols,
+                h_samp,
+                v_samp,
+                comp_idx,
+                actual_block_cols,
+                actual_block_rows,
                 ac_table,
                 is_refinement,
                 encoder,
@@ -1567,7 +1763,8 @@ impl Encoder {
         cr_blocks: &[[i16; DCTSIZE2]],
         mcu_rows: usize,
         mcu_cols: usize,
-        h_samp: u8, v_samp: u8,
+        h_samp: u8,
+        v_samp: u8,
         dc_luma: &DerivedTable,
         dc_chroma: &DerivedTable,
         is_refinement: bool,
@@ -1630,7 +1827,8 @@ impl Encoder {
         blocks: &[[i16; DCTSIZE2]],
         _mcu_rows: usize,
         mcu_cols: usize,
-        h_samp: u8, v_samp: u8,
+        h_samp: u8,
+        v_samp: u8,
         comp_idx: usize,
         actual_block_cols: usize,
         actual_block_rows: usize,
@@ -1674,20 +1872,24 @@ impl Encoder {
                     let v_idx = block_row % v;
                     let h_idx = block_col % h;
                     let storage_idx = mcu_row * (mcu_cols * blocks_per_mcu)
-                                    + mcu_col * blocks_per_mcu
-                                    + v_idx * h
-                                    + h_idx;
+                        + mcu_col * blocks_per_mcu
+                        + v_idx * h
+                        + h_idx;
 
                     if is_refinement {
                         encoder.encode_ac_refine(
                             &blocks[storage_idx],
-                            scan.ss, scan.se, scan.al,
+                            scan.ss,
+                            scan.se,
+                            scan.al,
                             ac_table,
                         )?;
                     } else {
                         encoder.encode_ac_first(
                             &blocks[storage_idx],
-                            scan.ss, scan.se, scan.al,
+                            scan.ss,
+                            scan.se,
+                            scan.al,
                             ac_table,
                         )?;
                     }
@@ -1708,7 +1910,8 @@ impl Encoder {
         cr_blocks: &[[i16; DCTSIZE2]],
         mcu_rows: usize,
         mcu_cols: usize,
-        h_samp: u8, v_samp: u8,
+        h_samp: u8,
+        v_samp: u8,
         dc_luma_freq: &mut FrequencyCounter,
         dc_chroma_freq: &mut FrequencyCounter,
     ) {
@@ -1746,7 +1949,8 @@ impl Encoder {
         blocks: &[[i16; DCTSIZE2]],
         _mcu_rows: usize,
         mcu_cols: usize,
-        h_samp: u8, v_samp: u8,
+        h_samp: u8,
+        v_samp: u8,
         comp_idx: usize,
         actual_block_cols: usize,
         actual_block_rows: usize,
@@ -1781,11 +1985,17 @@ impl Encoder {
                     let v_idx = block_row % v;
                     let h_idx = block_col % h;
                     let storage_idx = mcu_row * (mcu_cols * blocks_per_mcu)
-                                    + mcu_col * blocks_per_mcu
-                                    + v_idx * h
-                                    + h_idx;
+                        + mcu_col * blocks_per_mcu
+                        + v_idx * h
+                        + h_idx;
 
-                    counter.count_ac_first(&blocks[storage_idx], scan.ss, scan.se, scan.al, ac_freq);
+                    counter.count_ac_first(
+                        &blocks[storage_idx],
+                        scan.ss,
+                        scan.se,
+                        scan.al,
+                        ac_freq,
+                    );
                 }
             }
         }
@@ -1904,11 +2114,7 @@ fn write_sos_marker<W: Write>(
     }
 
     // Spectral selection start (Ss), end (Se), successive approximation (Ah, Al)
-    output.write_all(&[
-        scan.ss,
-        scan.se,
-        (scan.ah << 4) | scan.al,
-    ])?;
+    output.write_all(&[scan.ss, scan.se, (scan.ah << 4) | scan.al])?;
 
     Ok(())
 }
@@ -2097,9 +2303,9 @@ mod tests {
 
         // Fill with red
         for i in 0..(width * height) as usize {
-            rgb_data[i * 3] = 255;     // R
-            rgb_data[i * 3 + 1] = 0;   // G
-            rgb_data[i * 3 + 2] = 0;   // B
+            rgb_data[i * 3] = 255; // R
+            rgb_data[i * 3 + 1] = 0; // G
+            rgb_data[i * 3 + 2] = 0; // B
         }
 
         let encoder = Encoder::new().quality(75);
@@ -2190,9 +2396,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x08, // Offset to IFD
         ];
 
-        let encoder = Encoder::new()
-            .quality(75)
-            .exif_data(exif_data.clone());
+        let encoder = Encoder::new().quality(75).exif_data(exif_data.clone());
 
         let jpeg_data = encoder.encode_rgb(&rgb_data, width, height).unwrap();
 
@@ -2270,11 +2474,17 @@ mod tests {
             }
         }
         // 64 MCUs / 4 = 16 groups, so 15 restart markers between them
-        assert_eq!(rst_count, 15, "Expected 15 RST markers, found {}", rst_count);
+        assert_eq!(
+            rst_count, 15,
+            "Expected 15 RST markers, found {}",
+            rst_count
+        );
 
         // Should be decodable
         let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&jpeg_data));
-        let decoded = decoder.decode().expect("Failed to decode JPEG with restart markers");
+        let decoded = decoder
+            .decode()
+            .expect("Failed to decode JPEG with restart markers");
         assert_eq!(decoded.len(), (width * height * 3) as usize);
     }
 
@@ -2293,15 +2503,33 @@ mod tests {
 
         // Zero width
         let result = encoder.encode_rgb(&[], 0, 16);
-        assert!(matches!(result, Err(Error::InvalidDimensions { width: 0, height: 16 })));
+        assert!(matches!(
+            result,
+            Err(Error::InvalidDimensions {
+                width: 0,
+                height: 16
+            })
+        ));
 
         // Zero height
         let result = encoder.encode_rgb(&[], 16, 0);
-        assert!(matches!(result, Err(Error::InvalidDimensions { width: 16, height: 0 })));
+        assert!(matches!(
+            result,
+            Err(Error::InvalidDimensions {
+                width: 16,
+                height: 0
+            })
+        ));
 
         // Both zero
         let result = encoder.encode_rgb(&[], 0, 0);
-        assert!(matches!(result, Err(Error::InvalidDimensions { width: 0, height: 0 })));
+        assert!(matches!(
+            result,
+            Err(Error::InvalidDimensions {
+                width: 0,
+                height: 0
+            })
+        ));
     }
 
     #[test]
@@ -2514,7 +2742,9 @@ mod tests {
 
         // Both should be decodable
         let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&no_opt_data));
-        decoder.decode().expect("Failed to decode non-optimized JPEG");
+        decoder
+            .decode()
+            .expect("Failed to decode non-optimized JPEG");
 
         let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&with_opt_data));
         decoder.decode().expect("Failed to decode optimized JPEG");
@@ -2547,9 +2777,7 @@ mod tests {
             }
 
             // Encode with 4:4:4 to avoid chroma subsampling issues
-            let encoder = Encoder::new()
-                .quality(95)
-                .subsampling(Subsampling::S444);
+            let encoder = Encoder::new().quality(95).subsampling(Subsampling::S444);
             let jpeg = encoder.encode_rgb(&rgb_data, width, height).unwrap();
 
             // Decode and check
@@ -2566,15 +2794,35 @@ mod tests {
             let g_diff = (dg as i16 - *g as i16).abs();
             let b_diff = (db as i16 - *b as i16).abs();
 
-            println!("{}: input=({},{},{}), output=({},{},{}), diff=({},{},{})",
-                     name, r, g, b, dr, dg, db, r_diff, g_diff, b_diff);
+            println!(
+                "{}: input=({},{},{}), output=({},{},{}), diff=({},{},{})",
+                name, r, g, b, dr, dg, db, r_diff, g_diff, b_diff
+            );
 
-            assert!(r_diff <= tolerance,
-                    "{}: R mismatch - expected {}, got {} (diff {})", name, r, dr, r_diff);
-            assert!(g_diff <= tolerance,
-                    "{}: G mismatch - expected {}, got {} (diff {})", name, g, dg, g_diff);
-            assert!(b_diff <= tolerance,
-                    "{}: B mismatch - expected {}, got {} (diff {})", name, b, db, b_diff);
+            assert!(
+                r_diff <= tolerance,
+                "{}: R mismatch - expected {}, got {} (diff {})",
+                name,
+                r,
+                dr,
+                r_diff
+            );
+            assert!(
+                g_diff <= tolerance,
+                "{}: G mismatch - expected {}, got {} (diff {})",
+                name,
+                g,
+                dg,
+                g_diff
+            );
+            assert!(
+                b_diff <= tolerance,
+                "{}: B mismatch - expected {}, got {} (diff {})",
+                name,
+                b,
+                db,
+                b_diff
+            );
         }
     }
 
@@ -2616,10 +2864,14 @@ mod tests {
 
         // Both should be decodable
         let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&no_opt_data));
-        decoder.decode().expect("Failed to decode non-optimized JPEG");
+        decoder
+            .decode()
+            .expect("Failed to decode non-optimized JPEG");
 
         let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&with_opt_data));
-        decoder.decode().expect("Failed to decode scan-optimized JPEG");
+        decoder
+            .decode()
+            .expect("Failed to decode scan-optimized JPEG");
 
         // Optimized version should be valid (size comparison depends on image)
         assert!(!with_opt_data.is_empty());
@@ -2696,7 +2948,11 @@ mod tests {
             assert!(
                 diff < 3.0,
                 "{}x{}: Progressive PSNR ({:.1}) differs from baseline ({:.1}) by {:.1} dB",
-                size, size, prog_psnr, base_psnr, diff
+                size,
+                size,
+                prog_psnr,
+                base_psnr,
+                diff
             );
 
             // DSSIM perceptual quality check - both modes should be high quality
@@ -2706,12 +2962,16 @@ mod tests {
             assert!(
                 base_dssim < 0.01,
                 "{}x{}: Baseline DSSIM too high: {:.6}",
-                size, size, base_dssim
+                size,
+                size,
+                base_dssim
             );
             assert!(
                 prog_dssim < 0.01,
                 "{}x{}: Progressive DSSIM too high: {:.6}",
-                size, size, prog_dssim
+                size,
+                size,
+                prog_dssim
             );
         }
     }
@@ -2759,7 +3019,9 @@ mod tests {
         assert!(
             diff < 3.0,
             "4:2:2 17x17: Progressive PSNR ({:.1}) differs from baseline ({:.1}) by {:.1} dB",
-            prog_psnr, base_psnr, diff
+            prog_psnr,
+            base_psnr,
+            diff
         );
 
         // DSSIM perceptual quality check - non-MCU-aligned has higher DSSIM

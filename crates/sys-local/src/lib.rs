@@ -6,7 +6,7 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use libc::{c_int, c_uint, c_uchar, c_void, size_t};
+use libc::{c_int, c_uchar, c_uint, c_void, size_t};
 
 // Basic JPEG types
 pub type JDIMENSION = c_uint;
@@ -146,7 +146,11 @@ extern "C" {
     );
     pub fn jpeg_destroy_compress(cinfo: *mut jpeg_compress_struct);
     pub fn jpeg_set_defaults(cinfo: *mut jpeg_compress_struct);
-    pub fn jpeg_set_quality(cinfo: *mut jpeg_compress_struct, quality: c_int, force_baseline: boolean);
+    pub fn jpeg_set_quality(
+        cinfo: *mut jpeg_compress_struct,
+        quality: c_int,
+        force_baseline: boolean,
+    );
     pub fn jpeg_simple_progression(cinfo: *mut jpeg_compress_struct);
     pub fn jpeg_start_compress(cinfo: *mut jpeg_compress_struct, write_all_tables: boolean);
     pub fn jpeg_write_scanlines(
@@ -177,16 +181,17 @@ extern "C" {
     /// RGB to YCbCr conversion for a single pixel (from jccolor.c)
     /// Outputs Y, Cb, Cr values
     pub fn mozjpeg_test_rgb_to_ycbcr(
-        r: c_int, g: c_int, b: c_int,
-        y: *mut c_int, cb: *mut c_int, cr: *mut c_int,
+        r: c_int,
+        g: c_int,
+        b: c_int,
+        y: *mut c_int,
+        cb: *mut c_int,
+        cr: *mut c_int,
     );
 
     /// Quantize a single coefficient (from jcdctmgr.c)
     /// Returns quantized value
-    pub fn mozjpeg_test_quantize_coef(
-        coef: DCTELEM,
-        quantval: UINT16,
-    ) -> JCOEF;
+    pub fn mozjpeg_test_quantize_coef(coef: DCTELEM, quantval: UINT16) -> JCOEF;
 
     /// Get number of bits needed for a value (from jpeg_nbits.h)
     pub fn mozjpeg_test_nbits(value: c_int) -> c_int;
@@ -203,10 +208,7 @@ extern "C" {
     /// Applies deringing to level-shifted (centered) 8x8 block samples
     /// data: 64 level-shifted samples (-128 to +127)
     /// dc_quant: DC quantization value (used to limit overshoot)
-    pub fn mozjpeg_test_preprocess_deringing(
-        data: *mut DCTELEM,
-        dc_quant: UINT16,
-    );
+    pub fn mozjpeg_test_preprocess_deringing(data: *mut DCTELEM, dc_quant: UINT16);
 }
 
 // Version constant for jpeg_CreateCompress
@@ -251,11 +253,7 @@ mod tests {
         for q in test_qualities {
             let c_result = unsafe { mozjpeg_test_quality_scaling(q) };
             // Manual calculation to verify C implementation
-            let expected = if q < 50 {
-                5000 / q
-            } else {
-                200 - q * 2
-            };
+            let expected = if q < 50 { 5000 / q } else { 200 - q * 2 };
             assert_eq!(c_result, expected, "quality {} failed", q);
         }
     }
@@ -272,7 +270,11 @@ mod tests {
             } else {
                 32 - (val as u32).leading_zeros() as c_int
             };
-            assert_eq!(c_result, expected, "nbits({}) failed: C={}, expected={}", val, c_result, expected);
+            assert_eq!(
+                c_result, expected,
+                "nbits({}) failed: C={}, expected={}",
+                val, c_result, expected
+            );
         }
     }
 
@@ -280,11 +282,11 @@ mod tests {
     fn test_rgb_to_ycbcr() {
         // Test color conversion matches C
         let test_pixels = [
-            (0, 0, 0),      // Black
+            (0, 0, 0),       // Black
             (255, 255, 255), // White
-            (255, 0, 0),    // Red
-            (0, 255, 0),    // Green
-            (0, 0, 255),    // Blue
+            (255, 0, 0),     // Red
+            (0, 255, 0),     // Green
+            (0, 0, 255),     // Blue
             (128, 128, 128), // Gray
             (100, 150, 200), // Random
         ];
@@ -297,9 +299,30 @@ mod tests {
                 mozjpeg_test_rgb_to_ycbcr(r, g, b, &mut c_y, &mut c_cb, &mut c_cr);
             }
             // Just verify the C function works - actual comparison with Rust will be in the main crate
-            assert!(c_y >= 0 && c_y <= 255, "Y out of range for ({},{},{}): {}", r, g, b, c_y);
-            assert!(c_cb >= 0 && c_cb <= 255, "Cb out of range for ({},{},{}): {}", r, g, b, c_cb);
-            assert!(c_cr >= 0 && c_cr <= 255, "Cr out of range for ({},{},{}): {}", r, g, b, c_cr);
+            assert!(
+                c_y >= 0 && c_y <= 255,
+                "Y out of range for ({},{},{}): {}",
+                r,
+                g,
+                b,
+                c_y
+            );
+            assert!(
+                c_cb >= 0 && c_cb <= 255,
+                "Cb out of range for ({},{},{}): {}",
+                r,
+                g,
+                b,
+                c_cb
+            );
+            assert!(
+                c_cr >= 0 && c_cr <= 255,
+                "Cr out of range for ({},{},{}): {}",
+                r,
+                g,
+                b,
+                c_cr
+            );
         }
     }
 
@@ -307,19 +330,22 @@ mod tests {
     fn test_quantize_coef() {
         // Test coefficient quantization matches expected
         let test_cases = [
-            (100i16, 10u16, 10i16),   // 100/10 = 10
-            (99, 10, 10),              // (99+5)/10 = 10 (rounded)
-            (-100, 10, -10),           // Negative
-            (5, 10, 1),                // (5+5)/10 = 1
-            (4, 10, 0),                // (4+5)/10 = 0
-            (0, 16, 0),                // Zero stays zero
-            (1000, 16, 63),            // (1000+8)/16 = 63
+            (100i16, 10u16, 10i16), // 100/10 = 10
+            (99, 10, 10),           // (99+5)/10 = 10 (rounded)
+            (-100, 10, -10),        // Negative
+            (5, 10, 1),             // (5+5)/10 = 1
+            (4, 10, 0),             // (4+5)/10 = 0
+            (0, 16, 0),             // Zero stays zero
+            (1000, 16, 63),         // (1000+8)/16 = 63
         ];
 
         for (coef, quantval, expected) in test_cases {
             let c_result = unsafe { mozjpeg_test_quantize_coef(coef, quantval) };
-            assert_eq!(c_result, expected, "quantize({}, {}) failed: C={}, expected={}",
-                coef, quantval, c_result, expected);
+            assert_eq!(
+                c_result, expected,
+                "quantize({}, {}) failed: C={}, expected={}",
+                coef, quantval, c_result, expected
+            );
         }
     }
 
@@ -343,7 +369,11 @@ mod tests {
         assert_ne!(data2[0], 0, "DC coefficient should be non-zero");
         // AC coefficients (positions 1-63) should all be zero for uniform input
         for i in 1..64 {
-            assert_eq!(data2[i], 0, "AC coefficient {} should be zero for uniform input", i);
+            assert_eq!(
+                data2[i], 0,
+                "AC coefficient {} should be zero for uniform input",
+                i
+            );
         }
     }
 
@@ -356,12 +386,7 @@ mod tests {
         let mut output = [0u8; 4];
 
         unsafe {
-            mozjpeg_test_downsample_h2v2(
-                row0.as_ptr(),
-                row1.as_ptr(),
-                output.as_mut_ptr(),
-                8,
-            );
+            mozjpeg_test_downsample_h2v2(row0.as_ptr(), row1.as_ptr(), output.as_mut_ptr(), 8);
         }
 
         // Each output sample is average of 2x2 block with bias
@@ -370,7 +395,12 @@ mod tests {
         // etc.
         // Just verify output is in reasonable range
         for (i, &val) in output.iter().enumerate() {
-            assert!(val >= 100 && val <= 180, "output[{}] = {} out of expected range", i, val);
+            assert!(
+                val >= 100 && val <= 180,
+                "output[{}] = {} out of expected range",
+                i,
+                val
+            );
         }
     }
 
@@ -384,7 +414,10 @@ mod tests {
             mozjpeg_test_preprocess_deringing(data.as_mut_ptr(), 16);
         }
 
-        assert_eq!(data, original, "Block with no max pixels should be unchanged");
+        assert_eq!(
+            data, original,
+            "Block with no max pixels should be unchanged"
+        );
     }
 
     #[test]
@@ -398,7 +431,10 @@ mod tests {
             mozjpeg_test_preprocess_deringing(data.as_mut_ptr(), 16);
         }
 
-        assert_eq!(data, original, "Block with all max pixels should be unchanged");
+        assert_eq!(
+            data, original,
+            "Block with all max pixels should be unchanged"
+        );
     }
 
     #[test]
@@ -406,14 +442,9 @@ mod tests {
         // Natural order (zigzag) indices for testing
         // These are the zigzag scan order from JPEG spec
         const NATURAL_ORDER: [usize; 64] = [
-            0,  1,  8, 16,  9,  2,  3, 10,
-           17, 24, 32, 25, 18, 11,  4,  5,
-           12, 19, 26, 33, 40, 48, 41, 34,
-           27, 20, 13,  6,  7, 14, 21, 28,
-           35, 42, 49, 56, 57, 50, 43, 36,
-           29, 22, 15, 23, 30, 37, 44, 51,
-           58, 59, 52, 45, 38, 31, 39, 46,
-           53, 60, 61, 54, 47, 55, 62, 63,
+            0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34,
+            27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37,
+            44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
         ];
 
         let max_sample: i16 = 127;
@@ -441,7 +472,10 @@ mod tests {
                 break;
             }
         }
-        assert!(has_overshoot, "C deringing should create overshoot above max_sample");
+        assert!(
+            has_overshoot,
+            "C deringing should create overshoot above max_sample"
+        );
 
         // Check that overshoot is limited (max 31 above max_sample)
         for i in 10..16 {

@@ -22,7 +22,9 @@ use std::ptr;
 use std::time::Instant;
 
 // Re-export ssimulacra2 types
-use ssimulacra2::{ColorPrimaries, Rgb as Ssim2Rgb, TransferCharacteristic, compute_frame_ssimulacra2};
+use ssimulacra2::{
+    compute_frame_ssimulacra2, ColorPrimaries, Rgb as Ssim2Rgb, TransferCharacteristic,
+};
 
 /// Result of encoding a single image at a specific quality
 #[derive(Debug, Clone)]
@@ -97,7 +99,10 @@ fn main() {
                     images.push(("kodak".to_string(), path));
                 }
             }
-            println!("Kodak corpus: {} images", images.iter().filter(|(c, _)| c == "kodak").count());
+            println!(
+                "Kodak corpus: {} images",
+                images.iter().filter(|(c, _)| c == "kodak").count()
+            );
         } else {
             eprintln!("Warning: Kodak corpus not found at {:?}", kodak_dir);
         }
@@ -128,7 +133,10 @@ fn main() {
     images.sort_by(|a, b| a.1.file_name().cmp(&b.1.file_name()));
 
     println!("Quality levels: {:?}", qualities);
-    println!("Total configurations: {}", images.len() * qualities.len() * 2);
+    println!(
+        "Total configurations: {}",
+        images.len() * qualities.len() * 2
+    );
     println!();
 
     let mut results: Vec<EncodingResult> = Vec::new();
@@ -145,7 +153,11 @@ fn main() {
             }
         };
 
-        let image_name = image_path.file_name().unwrap().to_string_lossy().to_string();
+        let image_name = image_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         let pixels = (width * height) as f64;
 
         for &quality in &qualities {
@@ -171,7 +183,12 @@ fn main() {
             });
 
             completed += 1;
-            print!("\rProgress: {}/{} ({:.1}%)", completed, total, 100.0 * completed as f64 / total as f64);
+            print!(
+                "\rProgress: {}/{} ({:.1}%)",
+                completed,
+                total,
+                100.0 * completed as f64 / total as f64
+            );
             std::io::stdout().flush().ok();
 
             // Encode with C mozjpeg
@@ -196,7 +213,12 @@ fn main() {
             });
 
             completed += 1;
-            print!("\rProgress: {}/{} ({:.1}%)", completed, total, 100.0 * completed as f64 / total as f64);
+            print!(
+                "\rProgress: {}/{} ({:.1}%)",
+                completed,
+                total,
+                100.0 * completed as f64 / total as f64
+            );
             std::io::stdout().flush().ok();
         }
     }
@@ -345,27 +367,53 @@ fn compute_metrics(original: &[u8], decoded: &[u8], width: u32, height: u32) -> 
     use rgb::RGB8;
 
     // Convert to RGB8 format for dssim
-    let orig_rgb: Vec<RGB8> = original.chunks(3)
-        .map(|c| RGB8 { r: c[0], g: c[1], b: c[2] })
+    let orig_rgb: Vec<RGB8> = original
+        .chunks(3)
+        .map(|c| RGB8 {
+            r: c[0],
+            g: c[1],
+            b: c[2],
+        })
         .collect();
-    let dec_rgb: Vec<RGB8> = decoded.chunks(3)
-        .map(|c| RGB8 { r: c[0], g: c[1], b: c[2] })
+    let dec_rgb: Vec<RGB8> = decoded
+        .chunks(3)
+        .map(|c| RGB8 {
+            r: c[0],
+            g: c[1],
+            b: c[2],
+        })
         .collect();
 
     // Compute DSSIM
     let dssim = Dssim::new();
-    let orig_img = dssim.create_image_rgb(&orig_rgb, width as usize, height as usize)
+    let orig_img = dssim
+        .create_image_rgb(&orig_rgb, width as usize, height as usize)
         .expect("Failed to create DSSIM image");
-    let dec_img = dssim.create_image_rgb(&dec_rgb, width as usize, height as usize)
+    let dec_img = dssim
+        .create_image_rgb(&dec_rgb, width as usize, height as usize)
         .expect("Failed to create DSSIM image");
     let (dssim_val, _) = dssim.compare(&orig_img, dec_img);
 
     // Compute SSIMULACRA2 - convert u8 RGB to f32 RGB (0.0-1.0 range)
-    let orig_f32: Vec<[f32; 3]> = original.chunks(3)
-        .map(|c| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0])
+    let orig_f32: Vec<[f32; 3]> = original
+        .chunks(3)
+        .map(|c| {
+            [
+                c[0] as f32 / 255.0,
+                c[1] as f32 / 255.0,
+                c[2] as f32 / 255.0,
+            ]
+        })
         .collect();
-    let dec_f32: Vec<[f32; 3]> = decoded.chunks(3)
-        .map(|c| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0])
+    let dec_f32: Vec<[f32; 3]> = decoded
+        .chunks(3)
+        .map(|c| {
+            [
+                c[0] as f32 / 255.0,
+                c[1] as f32 / 255.0,
+                c[2] as f32 / 255.0,
+            ]
+        })
         .collect();
 
     let orig_ssim = Ssim2Rgb::new(
@@ -374,7 +422,8 @@ fn compute_metrics(original: &[u8], decoded: &[u8], width: u32, height: u32) -> 
         height as usize,
         TransferCharacteristic::SRGB,
         ColorPrimaries::BT709,
-    ).expect("Failed to create SSIM2 source image");
+    )
+    .expect("Failed to create SSIM2 source image");
 
     let dec_ssim = Ssim2Rgb::new(
         dec_f32,
@@ -382,7 +431,8 @@ fn compute_metrics(original: &[u8], decoded: &[u8], width: u32, height: u32) -> 
         height as usize,
         TransferCharacteristic::SRGB,
         ColorPrimaries::BT709,
-    ).expect("Failed to create SSIM2 distorted image");
+    )
+    .expect("Failed to create SSIM2 distorted image");
 
     let ssim2 = compute_frame_ssimulacra2(orig_ssim, dec_ssim).unwrap_or(0.0);
 
@@ -393,12 +443,25 @@ fn write_csv(path: &Path, results: &[EncodingResult]) -> std::io::Result<()> {
     let mut file = File::create(path)?;
 
     // Header
-    writeln!(file, "corpus,image,encoder,quality,file_size,bpp,ssimulacra2,dssim,encode_time_ms")?;
+    writeln!(
+        file,
+        "corpus,image,encoder,quality,file_size,bpp,ssimulacra2,dssim,encode_time_ms"
+    )?;
 
     for r in results {
-        writeln!(file, "{},{},{},{},{},{:.6},{:.6},{:.8},{:.3}",
-            r.corpus, r.image, r.encoder, r.quality, r.file_size,
-            r.bpp, r.ssimulacra2, r.dssim, r.encode_time_ms)?;
+        writeln!(
+            file,
+            "{},{},{},{},{},{:.6},{:.6},{:.8},{:.3}",
+            r.corpus,
+            r.image,
+            r.encoder,
+            r.quality,
+            r.file_size,
+            r.bpp,
+            r.ssimulacra2,
+            r.dssim,
+            r.encode_time_ms
+        )?;
     }
 
     Ok(())
@@ -408,17 +471,28 @@ fn print_summary(results: &[EncodingResult], qualities: &[u8]) {
     println!("Summary by Quality Level");
     println!("========================");
     println!();
-    println!("{:>5} {:>12} {:>12} {:>10} {:>10} {:>12} {:>12}",
-        "Q", "Rust Size", "C Size", "Size Δ%", "SSIM2 Δ", "Rust DSSIM", "C DSSIM");
+    println!(
+        "{:>5} {:>12} {:>12} {:>10} {:>10} {:>12} {:>12}",
+        "Q", "Rust Size", "C Size", "Size Δ%", "SSIM2 Δ", "Rust DSSIM", "C DSSIM"
+    );
     println!("{}", "-".repeat(85));
 
     for &q in qualities {
-        let rust: Vec<_> = results.iter().filter(|r| r.encoder == "rust" && r.quality == q).collect();
-        let c: Vec<_> = results.iter().filter(|r| r.encoder == "c" && r.quality == q).collect();
+        let rust: Vec<_> = results
+            .iter()
+            .filter(|r| r.encoder == "rust" && r.quality == q)
+            .collect();
+        let c: Vec<_> = results
+            .iter()
+            .filter(|r| r.encoder == "c" && r.quality == q)
+            .collect();
 
-        if rust.is_empty() || c.is_empty() { continue; }
+        if rust.is_empty() || c.is_empty() {
+            continue;
+        }
 
-        let rust_size: f64 = rust.iter().map(|r| r.file_size as f64).sum::<f64>() / rust.len() as f64;
+        let rust_size: f64 =
+            rust.iter().map(|r| r.file_size as f64).sum::<f64>() / rust.len() as f64;
         let c_size: f64 = c.iter().map(|r| r.file_size as f64).sum::<f64>() / c.len() as f64;
         let rust_ssim2: f64 = rust.iter().map(|r| r.ssimulacra2).sum::<f64>() / rust.len() as f64;
         let c_ssim2: f64 = c.iter().map(|r| r.ssimulacra2).sum::<f64>() / c.len() as f64;
@@ -428,8 +502,10 @@ fn print_summary(results: &[EncodingResult], qualities: &[u8]) {
         let size_diff = (rust_size - c_size) / c_size * 100.0;
         let ssim2_diff = rust_ssim2 - c_ssim2;
 
-        println!("{:>5} {:>12.0} {:>12.0} {:>+9.2}% {:>+10.4} {:>12.6} {:>12.6}",
-            q, rust_size, c_size, size_diff, ssim2_diff, rust_dssim, c_dssim);
+        println!(
+            "{:>5} {:>12.0} {:>12.0} {:>+9.2}% {:>+10.4} {:>12.6} {:>12.6}",
+            q, rust_size, c_size, size_diff, ssim2_diff, rust_dssim, c_dssim
+        );
     }
 
     println!();

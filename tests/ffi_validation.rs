@@ -3,7 +3,7 @@
 //! These tests verify that our Rust port produces identical results to the
 //! original C implementation at each layer.
 
-use mozjpeg_oxide::consts::{STD_LUMINANCE_QUANT_TBL, STD_CHROMINANCE_QUANT_TBL, DCTSIZE2};
+use mozjpeg_oxide::consts::{DCTSIZE2, STD_CHROMINANCE_QUANT_TBL, STD_LUMINANCE_QUANT_TBL};
 use mozjpeg_oxide::quant::quality_to_scale_factor;
 
 /// Test that our quality_to_scale_factor matches mozjpeg's jpeg_quality_scaling.
@@ -174,9 +174,9 @@ fn test_rust_vs_c_mozjpeg_encoder() {
     for y in 0..height {
         for x in 0..width {
             let i = (y * width + x) as usize;
-            rgb_data[i * 3] = (x * 4) as u8;     // R gradient
+            rgb_data[i * 3] = (x * 4) as u8; // R gradient
             rgb_data[i * 3 + 1] = (y * 4) as u8; // G gradient
-            rgb_data[i * 3 + 2] = 128;           // B constant
+            rgb_data[i * 3 + 2] = 128; // B constant
         }
     }
 
@@ -190,9 +190,7 @@ fn test_rust_vs_c_mozjpeg_encoder() {
         let rust_jpeg = rust_encoder.encode_rgb(&rgb_data, width, height).unwrap();
 
         // Encode with C mozjpeg
-        let c_jpeg = unsafe {
-            encode_with_c_mozjpeg(&rgb_data, width, height, quality)
-        };
+        let c_jpeg = unsafe { encode_with_c_mozjpeg(&rgb_data, width, height, quality) };
 
         // Verify both produce valid JPEG files
         assert!(rust_jpeg.len() > 100, "Rust JPEG too small");
@@ -217,10 +215,20 @@ fn test_rust_vs_c_mozjpeg_encoder() {
         let size_ratio = rust_jpeg.len() as f64 / c_jpeg.len() as f64;
 
         println!("Q{:2}:", quality);
-        println!("  File size: Rust={:5} bytes, C={:5} bytes (ratio: {:.2}x)",
-                 rust_jpeg.len(), c_jpeg.len(), size_ratio);
-        println!("  PSNR vs original: Rust={:.2} dB, C={:.2} dB", rust_psnr, c_psnr);
-        println!("  PSNR Rust vs C decoded: {:.2} dB (higher = more similar)", decoded_psnr);
+        println!(
+            "  File size: Rust={:5} bytes, C={:5} bytes (ratio: {:.2}x)",
+            rust_jpeg.len(),
+            c_jpeg.len(),
+            size_ratio
+        );
+        println!(
+            "  PSNR vs original: Rust={:.2} dB, C={:.2} dB",
+            rust_psnr, c_psnr
+        );
+        println!(
+            "  PSNR Rust vs C decoded: {:.2} dB (higher = more similar)",
+            decoded_psnr
+        );
 
         // Report status (don't fail - this is informational)
         if rust_psnr < 20.0 {
@@ -274,7 +282,9 @@ unsafe fn encode_with_c_mozjpeg(rgb_data: &[u8], width: u32, height: u32, qualit
     // Write scanlines
     let row_stride = (width * 3) as usize;
     while cinfo.next_scanline < cinfo.image_height {
-        let row_ptr = rgb_data.as_ptr().add(cinfo.next_scanline as usize * row_stride);
+        let row_ptr = rgb_data
+            .as_ptr()
+            .add(cinfo.next_scanline as usize * row_stride);
         let mut row_array = [row_ptr as *const u8];
         mozjpeg_sys::jpeg_write_scanlines(&mut cinfo, row_array.as_mut_ptr() as *mut *const u8, 1);
     }
@@ -295,13 +305,15 @@ unsafe fn encode_with_c_mozjpeg(rgb_data: &[u8], width: u32, height: u32, qualit
 fn calculate_psnr(img1: &[u8], img2: &[u8]) -> f64 {
     assert_eq!(img1.len(), img2.len());
 
-    let mse: f64 = img1.iter()
+    let mse: f64 = img1
+        .iter()
         .zip(img2.iter())
         .map(|(&a, &b)| {
             let diff = a as f64 - b as f64;
             diff * diff
         })
-        .sum::<f64>() / img1.len() as f64;
+        .sum::<f64>()
+        / img1.len() as f64;
 
     if mse == 0.0 {
         return f64::INFINITY;

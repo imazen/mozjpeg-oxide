@@ -104,14 +104,13 @@ fn test_edge_cropping_all_remainders() {
                 calculate_regional_errors(&cropped, &rust_decoded.0, width, height);
 
             // Compare Rust vs C decoded pixels
-            let (rust_vs_c_avg, rust_vs_c_max) =
-                compare_pixels(&rust_decoded.0, &c_decoded.0);
+            let (rust_vs_c_avg, rust_vs_c_max) = compare_pixels(&rust_decoded.0, &c_decoded.0);
 
             // Check if edges are worse than center (allow 50% more error)
             let edge_threshold = center_err * 1.5 + 1.0; // +1 for numerical stability
             let edges_ok = right_err <= edge_threshold
-                        && bottom_err <= edge_threshold
-                        && corner_err <= edge_threshold;
+                && bottom_err <= edge_threshold
+                && corner_err <= edge_threshold;
 
             // Note: Rust vs C pixel differences of up to 11 are a known issue
             // documented in CLAUDE.md. This test focuses on edge degradation.
@@ -119,9 +118,14 @@ fn test_edge_cropping_all_remainders() {
             let _rust_c_match = rust_vs_c_max <= 1 && rust_vs_c_avg <= 0.5;
 
             if !edges_ok {
-                failures.push((width, height, format!(
-                    "Edge degradation: center={:.1}, right={:.1}, bottom={:.1}, corner={:.1}",
-                    center_err, right_err, bottom_err, corner_err)));
+                failures.push((
+                    width,
+                    height,
+                    format!(
+                        "Edge degradation: center={:.1}, right={:.1}, bottom={:.1}, corner={:.1}",
+                        center_err, right_err, bottom_err, corner_err
+                    ),
+                ));
             }
             // Note: We don't fail on Rust vs C mismatch as this is a known issue
 
@@ -146,7 +150,7 @@ fn calculate_regional_errors(
     width: usize,
     height: usize,
 ) -> (f64, f64, f64, f64) {
-    let edge_width = 8.min(width / 4);  // Right edge strip
+    let edge_width = 8.min(width / 4); // Right edge strip
     let edge_height = 8.min(height / 4); // Bottom edge strip
 
     let mut center_sum = 0u64;
@@ -161,7 +165,7 @@ fn calculate_regional_errors(
     for y in 0..height {
         for x in 0..width {
             let idx = (y * width + x) * 3;
-            let err = pixel_error(&original[idx..idx+3], &decoded[idx..idx+3]);
+            let err = pixel_error(&original[idx..idx + 3], &decoded[idx..idx + 3]);
 
             let is_right = x >= width - edge_width;
             let is_bottom = y >= height - edge_height;
@@ -182,10 +186,26 @@ fn calculate_regional_errors(
         }
     }
 
-    let center_err = if center_count > 0 { center_sum as f64 / center_count as f64 } else { 0.0 };
-    let right_err = if right_count > 0 { right_sum as f64 / right_count as f64 } else { 0.0 };
-    let bottom_err = if bottom_count > 0 { bottom_sum as f64 / bottom_count as f64 } else { 0.0 };
-    let corner_err = if corner_count > 0 { corner_sum as f64 / corner_count as f64 } else { 0.0 };
+    let center_err = if center_count > 0 {
+        center_sum as f64 / center_count as f64
+    } else {
+        0.0
+    };
+    let right_err = if right_count > 0 {
+        right_sum as f64 / right_count as f64
+    } else {
+        0.0
+    };
+    let bottom_err = if bottom_count > 0 {
+        bottom_sum as f64 / bottom_count as f64
+    } else {
+        0.0
+    };
+    let corner_err = if corner_count > 0 {
+        corner_sum as f64 / corner_count as f64
+    } else {
+        0.0
+    };
 
     (center_err, right_err, bottom_err, corner_err)
 }
@@ -211,7 +231,7 @@ fn compare_pixels(a: &[u8], b: &[u8]) -> (f64, u8) {
 
     for i in 0..pixel_count {
         let idx = i * 3;
-        let err = pixel_error(&a[idx..idx+3], &b[idx..idx+3]);
+        let err = pixel_error(&a[idx..idx + 3], &b[idx..idx + 3]);
         sum += err as u64;
         max_diff = max_diff.max(err);
     }

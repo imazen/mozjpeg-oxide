@@ -167,7 +167,11 @@ impl<'a, W: Write> EntropyEncoder<'a, W> {
     ///
     /// AC coefficients are encoded in zigzag order as (run, size) pairs
     /// where run is the number of preceding zeros and size is the magnitude bits.
-    fn encode_ac(&mut self, block: &[i16; DCTSIZE2], ac_table: &DerivedTable) -> std::io::Result<()> {
+    fn encode_ac(
+        &mut self,
+        block: &[i16; DCTSIZE2],
+        ac_table: &DerivedTable,
+    ) -> std::io::Result<()> {
         let mut run = 0u8; // Run length of zeros
 
         // Process coefficients 1-63 in zigzag order
@@ -421,11 +425,7 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
     /// Encode a DC refinement scan (Ah != 0).
     ///
     /// Just outputs a single bit for each block.
-    pub fn encode_dc_refine(
-        &mut self,
-        block: &[i16; DCTSIZE2],
-        al: u8,
-    ) -> std::io::Result<()> {
+    pub fn encode_dc_refine(&mut self, block: &[i16; DCTSIZE2], al: u8) -> std::io::Result<()> {
         // Output the next bit of DC coefficient
         let bit = ((block[0] >> al) & 1) as u32;
         self.writer.put_bits(bit, 1)?;
@@ -448,7 +448,6 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
         al: u8,
         ac_table: &DerivedTable,
     ) -> std::io::Result<()> {
-
         // Find last non-zero coefficient in this band
         let mut k = se;
         while k >= ss {
@@ -823,8 +822,7 @@ mod tests {
     use super::*;
     use crate::bitstream::VecBitWriter;
     use crate::consts::{
-        DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES,
-        AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES,
+        AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES,
     };
     use crate::huffman::HuffTable;
 
@@ -908,15 +906,21 @@ mod tests {
         block[0] = 100;
 
         let mut encoder = EntropyEncoder::new(&mut writer);
-        encoder.encode_block(&block, 0, &dc_table, &ac_table).unwrap();
+        encoder
+            .encode_block(&block, 0, &dc_table, &ac_table)
+            .unwrap();
 
         // Second block: DC = 105 (diff = 5)
         block[0] = 105;
-        encoder.encode_block(&block, 0, &dc_table, &ac_table).unwrap();
+        encoder
+            .encode_block(&block, 0, &dc_table, &ac_table)
+            .unwrap();
 
         // Third block: DC = 95 (diff = -10)
         block[0] = 95;
-        encoder.encode_block(&block, 0, &dc_table, &ac_table).unwrap();
+        encoder
+            .encode_block(&block, 0, &dc_table, &ac_table)
+            .unwrap();
 
         encoder.flush().unwrap();
 
@@ -931,10 +935,10 @@ mod tests {
 
         // Block with some AC coefficients
         let mut block = [0i16; DCTSIZE2];
-        block[0] = 50;   // DC
-        block[1] = 10;   // AC at position 1
-        block[8] = -5;   // AC at position 8 (zigzag position 2)
-        block[16] = 3;   // AC at position 16 (zigzag position 3)
+        block[0] = 50; // DC
+        block[1] = 10; // AC at position 1
+        block[8] = -5; // AC at position 8 (zigzag position 2)
+        block[16] = 3; // AC at position 16 (zigzag position 3)
 
         encode_block_standalone(&mut writer, &block, 0, &dc_table, &ac_table).unwrap();
         writer.flush().unwrap();
@@ -949,10 +953,10 @@ mod tests {
 
         // Test block with known AC coefficients
         let mut block = [0i16; DCTSIZE2];
-        block[1] = 10;   // AC at natural position 1 (zigzag 1)
-        block[8] = -5;   // AC at natural position 8 (zigzag 2)
-        block[16] = 3;   // AC at natural position 16 (zigzag 3)
-        // block[0] is DC, not encoded in AC scan
+        block[1] = 10; // AC at natural position 1 (zigzag 1)
+        block[8] = -5; // AC at natural position 8 (zigzag 2)
+        block[16] = 3; // AC at natural position 16 (zigzag 3)
+                       // block[0] is DC, not encoded in AC scan
 
         // Baseline-style AC encoding
         let mut base_writer = VecBitWriter::new_vec();
@@ -993,7 +997,9 @@ mod tests {
         let mut prog_writer = VecBitWriter::new_vec();
         {
             let mut encoder = ProgressiveEncoder::new_standard_tables(&mut prog_writer);
-            encoder.encode_ac_first(&block, 1, 63, 0, &ac_table).unwrap();
+            encoder
+                .encode_ac_first(&block, 1, 63, 0, &ac_table)
+                .unwrap();
             encoder.finish_scan(Some(&ac_table)).unwrap();
         }
         let prog_bytes = prog_writer.into_bytes();
@@ -1019,36 +1025,50 @@ mod tests {
 
         // Create 8 blocks with different AC patterns (simulating 2 MCUs of 4 blocks each)
         let mut blocks = [[0i16; DCTSIZE2]; 8];
-        blocks[0][1] = 10;   // Block 0: some AC
-        blocks[1][1] = 20;   // Block 1: different AC
-        blocks[2][1] = 5;    // Block 2
-        blocks[3][1] = -5;   // Block 3
-        blocks[4][1] = 15;   // Block 4
-        blocks[5][1] = -10;  // Block 5
-        blocks[6][1] = 8;    // Block 6
-        blocks[7][1] = -3;   // Block 7
+        blocks[0][1] = 10; // Block 0: some AC
+        blocks[1][1] = 20; // Block 1: different AC
+        blocks[2][1] = 5; // Block 2
+        blocks[3][1] = -5; // Block 3
+        blocks[4][1] = 15; // Block 4
+        blocks[5][1] = -10; // Block 5
+        blocks[6][1] = 8; // Block 6
+        blocks[7][1] = -3; // Block 7
 
         // Encode all 8 blocks with progressive AC encoder
         let mut prog_writer = VecBitWriter::new_vec();
         {
             let mut encoder = ProgressiveEncoder::new_standard_tables(&mut prog_writer);
             for i in 0..8 {
-                encoder.encode_ac_first(&blocks[i], 1, 63, 0, &ac_table).unwrap();
+                encoder
+                    .encode_ac_first(&blocks[i], 1, 63, 0, &ac_table)
+                    .unwrap();
             }
             encoder.finish_scan(Some(&ac_table)).unwrap();
         }
         let prog_bytes = prog_writer.into_bytes();
 
         // Progressive encoding should produce valid output
-        assert!(!prog_bytes.is_empty(), "Progressive encoding should produce output");
+        assert!(
+            !prog_bytes.is_empty(),
+            "Progressive encoding should produce output"
+        );
 
         // The output should be reasonably sized (not empty, not excessively large)
         // Each block with 1 non-zero AC coefficient + EOB should be ~2-3 bytes per block
         // 8 blocks should produce roughly 16-24 bytes (tighter packing than baseline)
-        assert!(prog_bytes.len() >= 8, "Output should have at least 1 byte per block");
-        assert!(prog_bytes.len() <= 30, "Output should not be excessively large");
+        assert!(
+            prog_bytes.len() >= 8,
+            "Output should have at least 1 byte per block"
+        );
+        assert!(
+            prog_bytes.len() <= 30,
+            "Output should not be excessively large"
+        );
 
-        println!("Progressive multi-block encoding: {} bytes", prog_bytes.len());
+        println!(
+            "Progressive multi-block encoding: {} bytes",
+            prog_bytes.len()
+        );
     }
 
     #[test]
@@ -1059,8 +1079,8 @@ mod tests {
 
         // Block with zeros followed by a coefficient
         let mut block = [0i16; DCTSIZE2];
-        block[0] = 10;   // DC
-        block[63] = 1;   // Last AC coefficient (requires 62 zeros before it)
+        block[0] = 10; // DC
+        block[63] = 1; // Last AC coefficient (requires 62 zeros before it)
 
         encode_block_standalone(&mut writer, &block, 0, &dc_table, &ac_table).unwrap();
         writer.flush().unwrap();
@@ -1078,9 +1098,9 @@ mod tests {
 
         // Block with negative coefficients
         let mut block = [0i16; DCTSIZE2];
-        block[0] = -50;   // DC
-        block[1] = -10;   // AC
-        block[8] = -1;    // AC
+        block[0] = -50; // DC
+        block[1] = -10; // AC
+        block[8] = -1; // AC
 
         encode_block_standalone(&mut writer, &block, 0, &dc_table, &ac_table).unwrap();
         writer.flush().unwrap();
@@ -1100,7 +1120,9 @@ mod tests {
         // Set DC values
         let mut block = [0i16; DCTSIZE2];
         block[0] = 100;
-        encoder.encode_block(&block, 0, &dc_table, &ac_table).unwrap();
+        encoder
+            .encode_block(&block, 0, &dc_table, &ac_table)
+            .unwrap();
         assert_eq!(encoder.last_dc(0), 100);
 
         // Reset
@@ -1119,15 +1141,21 @@ mod tests {
         // Encode Y component
         let mut block = [0i16; DCTSIZE2];
         block[0] = 100;
-        encoder.encode_block(&block, 0, &dc_table, &ac_table).unwrap();
+        encoder
+            .encode_block(&block, 0, &dc_table, &ac_table)
+            .unwrap();
 
         // Encode Cb component
         block[0] = 128;
-        encoder.encode_block(&block, 1, &dc_table, &ac_table).unwrap();
+        encoder
+            .encode_block(&block, 1, &dc_table, &ac_table)
+            .unwrap();
 
         // Encode Cr component
         block[0] = 130;
-        encoder.encode_block(&block, 2, &dc_table, &ac_table).unwrap();
+        encoder
+            .encode_block(&block, 2, &dc_table, &ac_table)
+            .unwrap();
 
         encoder.flush().unwrap();
 

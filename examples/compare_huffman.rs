@@ -20,7 +20,7 @@ fn main() {
         .quality(85)
         .subsampling(Subsampling::S444)
         .progressive(false)
-        .optimize_huffman(true)  // ENABLE Huffman optimization
+        .optimize_huffman(true) // ENABLE Huffman optimization
         .trellis(TrellisConfig::disabled())
         .encode_rgb(&rgb, s as u32, s as u32)
         .unwrap();
@@ -30,10 +30,10 @@ fn main() {
 
     std::fs::write("/tmp/rust_test.jpg", &rust_jpeg).unwrap();
     std::fs::write("/tmp/c_test.jpg", &c_jpeg).unwrap();
-    
+
     println!("Rust size: {}", rust_jpeg.len());
     println!("C size: {}", c_jpeg.len());
-    
+
     // Use djpeg to dump info
     let rust_info = Command::new("djpeg")
         .args(["-verbose", "-verbose", "/tmp/rust_test.jpg"])
@@ -41,7 +41,7 @@ fn main() {
     let c_info = Command::new("djpeg")
         .args(["-verbose", "-verbose", "/tmp/c_test.jpg"])
         .output();
-    
+
     if let Ok(output) = rust_info {
         println!("\n=== Rust JPEG info ===");
         println!("{}", String::from_utf8_lossy(&output.stderr));

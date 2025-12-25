@@ -57,10 +57,14 @@ impl ColorSpace {
             ColorSpace::Rgb | ColorSpace::YCbCr => 3,
             ColorSpace::ExtRgb | ColorSpace::ExtBgr => 3,
             ColorSpace::Cmyk | ColorSpace::Ycck => 4,
-            ColorSpace::ExtRgbx | ColorSpace::ExtBgrx |
-            ColorSpace::ExtXbgr | ColorSpace::ExtXrgb |
-            ColorSpace::ExtRgba | ColorSpace::ExtBgra |
-            ColorSpace::ExtAbgr | ColorSpace::ExtArgb => 4,
+            ColorSpace::ExtRgbx
+            | ColorSpace::ExtBgrx
+            | ColorSpace::ExtXbgr
+            | ColorSpace::ExtXrgb
+            | ColorSpace::ExtRgba
+            | ColorSpace::ExtBgra
+            | ColorSpace::ExtAbgr
+            | ColorSpace::ExtArgb => 4,
         }
     }
 
@@ -71,12 +75,19 @@ impl ColorSpace {
 
     /// Returns true if this is an RGB variant.
     pub const fn is_rgb_variant(self) -> bool {
-        matches!(self,
-            ColorSpace::Rgb | ColorSpace::ExtRgb | ColorSpace::ExtRgbx |
-            ColorSpace::ExtBgr | ColorSpace::ExtBgrx |
-            ColorSpace::ExtXbgr | ColorSpace::ExtXrgb |
-            ColorSpace::ExtRgba | ColorSpace::ExtBgra |
-            ColorSpace::ExtAbgr | ColorSpace::ExtArgb
+        matches!(
+            self,
+            ColorSpace::Rgb
+                | ColorSpace::ExtRgb
+                | ColorSpace::ExtRgbx
+                | ColorSpace::ExtBgr
+                | ColorSpace::ExtBgrx
+                | ColorSpace::ExtXbgr
+                | ColorSpace::ExtXrgb
+                | ColorSpace::ExtRgba
+                | ColorSpace::ExtBgra
+                | ColorSpace::ExtAbgr
+                | ColorSpace::ExtArgb
         )
     }
 }
@@ -297,7 +308,10 @@ pub struct QuantTable {
 impl QuantTable {
     /// Create a new quantization table from values.
     pub const fn new(values: [u16; DCTSIZE2]) -> Self {
-        Self { values, sent: false }
+        Self {
+            values,
+            sent: false,
+        }
     }
 
     /// Create from a base table scaled by a quality factor.
@@ -318,7 +332,10 @@ impl QuantTable {
             }
             values[i] = temp as u16;
         }
-        Self { values, sent: false }
+        Self {
+            values,
+            sent: false,
+        }
     }
 }
 
@@ -338,8 +355,8 @@ impl Default for QuantTable {
 /// A Huffman coding table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HuffmanTable {
-    /// Number of codes of each length (bits[k] = # of symbols with k-bit codes)
-    /// bits[0] is unused
+    /// Number of codes of each length (`bits[k]` = # of symbols with k-bit codes).
+    /// `bits[0]` is unused.
     pub bits: [u8; 17],
     /// Symbol values in order of increasing code length
     pub huffval: Vec<u8>,
@@ -350,7 +367,11 @@ pub struct HuffmanTable {
 impl HuffmanTable {
     /// Create a new Huffman table from bits and values.
     pub fn new(bits: [u8; 17], huffval: Vec<u8>) -> Self {
-        Self { bits, huffval, sent: false }
+        Self {
+            bits,
+            huffval,
+            sent: false,
+        }
     }
 
     /// Returns the total number of symbols in this table.

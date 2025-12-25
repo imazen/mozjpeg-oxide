@@ -65,8 +65,8 @@ pub fn generate_search_scans(num_components: u8, config: &ScanSearchConfig) -> V
     // For each Al level (0, 1, 2): refinement scan + two band scans at next level
     for al in 0..config.al_max_luma {
         scans.push(ScanInfo::ac_scan(0, 1, 63, al + 1, al)); // Refinement
-        scans.push(ScanInfo::ac_scan(0, 1, 8, 0, al + 1));   // Low freq at higher Al
-        scans.push(ScanInfo::ac_scan(0, 9, 63, 0, al + 1));  // High freq at higher Al
+        scans.push(ScanInfo::ac_scan(0, 1, 8, 0, al + 1)); // Low freq at higher Al
+        scans.push(ScanInfo::ac_scan(0, 9, 63, 0, al + 1)); // High freq at higher Al
     }
 
     // Full luma AC scan (no successive approx)
@@ -174,7 +174,11 @@ impl ScanSearchResult {
     ///
     /// When best_freq_split is 0, we use full 1-63 AC scans (most efficient for simple images).
     /// When best_freq_split > 0, we use the selected frequency split.
-    pub fn build_final_scans(&self, num_components: u8, config: &ScanSearchConfig) -> Vec<ScanInfo> {
+    pub fn build_final_scans(
+        &self,
+        num_components: u8,
+        config: &ScanSearchConfig,
+    ) -> Vec<ScanInfo> {
         let mut scans = Vec::new();
 
         // DC scan
@@ -335,12 +339,11 @@ impl ScanSelector {
         for al in 0..=al_max {
             let cost = if al == 0 {
                 // Cost = base scans (1-8) + (9-63)
-                scan_sizes.get(1).copied().unwrap_or(0)
-                     + scan_sizes.get(2).copied().unwrap_or(0)
+                scan_sizes.get(1).copied().unwrap_or(0) + scan_sizes.get(2).copied().unwrap_or(0)
             } else {
                 // Band scans at Al=k are at indices: 3*k + 1 and 3*k + 2
                 let mut c = scan_sizes.get(3 * al + 1).copied().unwrap_or(0)
-                          + scan_sizes.get(3 * al + 2).copied().unwrap_or(0);
+                    + scan_sizes.get(3 * al + 2).copied().unwrap_or(0);
 
                 // Add refinement costs: refinement from Al=k to Al=k-1 is at index 3*k
                 for k in 1..=al {
@@ -362,13 +365,15 @@ impl ScanSelector {
         // etc.
 
         let mut best_freq_split = 0usize; // 0 means use default 1-8, 9-63
-        let mut best_freq_cost = scan_sizes.get(self.luma_freq_split_scan_start - 1)
-            .copied().unwrap_or(usize::MAX);
+        let mut best_freq_cost = scan_sizes
+            .get(self.luma_freq_split_scan_start - 1)
+            .copied()
+            .unwrap_or(usize::MAX);
 
         for (i, _split) in self.config.frequency_splits.iter().enumerate() {
             let idx = self.luma_freq_split_scan_start + 2 * i;
             let cost = scan_sizes.get(idx).copied().unwrap_or(0)
-                     + scan_sizes.get(idx + 1).copied().unwrap_or(0);
+                + scan_sizes.get(idx + 1).copied().unwrap_or(0);
 
             if cost < best_freq_cost {
                 best_freq_cost = cost;
@@ -392,7 +397,7 @@ impl ScanSelector {
         // Check if interleaved DC is better
         let combined_dc = scan_sizes.get(base).copied().unwrap_or(0);
         let separate_dc = scan_sizes.get(base + 1).copied().unwrap_or(0)
-                        + scan_sizes.get(base + 2).copied().unwrap_or(0);
+            + scan_sizes.get(base + 2).copied().unwrap_or(0);
         let interleave_chroma_dc = combined_dc <= separate_dc;
 
         // Find best Al for chroma
@@ -406,16 +411,16 @@ impl ScanSelector {
                 let cb_base = base + dc_offset;
                 let cr_base = base + dc_offset + 2;
                 scan_sizes.get(cb_base).copied().unwrap_or(0)
-                     + scan_sizes.get(cb_base + 1).copied().unwrap_or(0)
-                     + scan_sizes.get(cr_base).copied().unwrap_or(0)
-                     + scan_sizes.get(cr_base + 1).copied().unwrap_or(0)
+                    + scan_sizes.get(cb_base + 1).copied().unwrap_or(0)
+                    + scan_sizes.get(cr_base).copied().unwrap_or(0)
+                    + scan_sizes.get(cr_base + 1).copied().unwrap_or(0)
             } else {
                 // Band scans at this Al + refinement costs
                 let band_idx = base + dc_offset + 4 + 6 * al;
                 let mut c = scan_sizes.get(band_idx - 4).copied().unwrap_or(0)
-                          + scan_sizes.get(band_idx - 3).copied().unwrap_or(0)
-                          + scan_sizes.get(band_idx - 2).copied().unwrap_or(0)
-                          + scan_sizes.get(band_idx - 1).copied().unwrap_or(0);
+                    + scan_sizes.get(band_idx - 3).copied().unwrap_or(0)
+                    + scan_sizes.get(band_idx - 2).copied().unwrap_or(0)
+                    + scan_sizes.get(band_idx - 1).copied().unwrap_or(0);
 
                 for prev_al in 0..al {
                     let refine_idx = base + dc_offset + 4 + 6 * prev_al;
@@ -435,15 +440,15 @@ impl ScanSelector {
         let mut best_freq_split = 0usize;
         let chroma_full_base = base + dc_offset + 4 + 6 * al_max;
         let mut best_freq_cost = scan_sizes.get(chroma_full_base).copied().unwrap_or(0)
-                               + scan_sizes.get(chroma_full_base + 1).copied().unwrap_or(0);
+            + scan_sizes.get(chroma_full_base + 1).copied().unwrap_or(0);
 
         let freq_base = self.chroma_freq_split_scan_start;
         for (i, _split) in self.config.frequency_splits.iter().enumerate() {
             let idx = freq_base + 4 * i;
             let cost = scan_sizes.get(idx).copied().unwrap_or(0)
-                     + scan_sizes.get(idx + 1).copied().unwrap_or(0)
-                     + scan_sizes.get(idx + 2).copied().unwrap_or(0)
-                     + scan_sizes.get(idx + 3).copied().unwrap_or(0);
+                + scan_sizes.get(idx + 1).copied().unwrap_or(0)
+                + scan_sizes.get(idx + 2).copied().unwrap_or(0)
+                + scan_sizes.get(idx + 3).copied().unwrap_or(0);
 
             if cost < best_freq_cost {
                 best_freq_cost = cost;
@@ -510,16 +515,19 @@ mod tests {
         // (leave at default)
 
         // Al=2 cost = scan[7] + scan[8] + scan[6] + scan[3]
-        scan_sizes[7] = 10;   // 1-8 at Al=2
-        scan_sizes[8] = 10;   // 9-63 at Al=2
-        scan_sizes[6] = 5;    // refinement Al=2 -> Al=1
-        scan_sizes[3] = 5;    // refinement Al=1 -> Al=0
-        // Al=2 cost = 10 + 10 + 5 + 5 = 30 << 2000
+        scan_sizes[7] = 10; // 1-8 at Al=2
+        scan_sizes[8] = 10; // 9-63 at Al=2
+        scan_sizes[6] = 5; // refinement Al=2 -> Al=1
+        scan_sizes[3] = 5; // refinement Al=1 -> Al=0
+                           // Al=2 cost = 10 + 10 + 5 + 5 = 30 << 2000
 
         let result = selector.select_best(&scan_sizes);
 
         // Should pick Al=2 since it's much cheaper (30 vs 2000)
-        assert_eq!(result.best_al_luma, 2, "Should prefer Al=2 when it's much cheaper (cost 30 vs 2000)");
+        assert_eq!(
+            result.best_al_luma, 2,
+            "Should prefer Al=2 when it's much cheaper (cost 30 vs 2000)"
+        );
     }
 
     #[test]
@@ -553,12 +561,15 @@ mod tests {
         // Make interleaved DC cheaper
         let mut scan_sizes = vec![100usize; 64];
         let base = 23; // num_scans_luma for YCbCr
-        scan_sizes[base] = 50;     // Combined Cb+Cr DC
+        scan_sizes[base] = 50; // Combined Cb+Cr DC
         scan_sizes[base + 1] = 30; // Cb DC
         scan_sizes[base + 2] = 30; // Cr DC
 
         let result = selector.select_best(&scan_sizes);
-        assert!(result.interleave_chroma_dc, "Should interleave when combined DC is smaller");
+        assert!(
+            result.interleave_chroma_dc,
+            "Should interleave when combined DC is smaller"
+        );
 
         // Make separate DC cheaper
         scan_sizes[base] = 100;
@@ -566,7 +577,10 @@ mod tests {
         scan_sizes[base + 2] = 20;
 
         let result = selector.select_best(&scan_sizes);
-        assert!(!result.interleave_chroma_dc, "Should not interleave when separate DC is smaller");
+        assert!(
+            !result.interleave_chroma_dc,
+            "Should not interleave when separate DC is smaller"
+        );
     }
 
     #[test]
@@ -581,7 +595,7 @@ mod tests {
         // Make the split at freq=5 (index 2 in splits array) much cheaper
         // Scans 17 and 18 are the split at 5 (1-5 and 6-63)
         let split_idx = 17;
-        scan_sizes[split_idx] = 20;     // 1-5
+        scan_sizes[split_idx] = 20; // 1-5
         scan_sizes[split_idx + 1] = 20; // 6-63
 
         // Full 1-63 scan (index 12) should be more expensive
@@ -589,7 +603,10 @@ mod tests {
 
         let result = selector.select_best(&scan_sizes);
         // best_freq_split_luma: 0 = default (1-8, 9-63), 1-5 = split indices
-        assert!(result.best_freq_split_luma > 0, "Should pick a frequency split when cheaper");
+        assert!(
+            result.best_freq_split_luma > 0,
+            "Should pick a frequency split when cheaper"
+        );
     }
 
     #[test]
@@ -607,7 +624,10 @@ mod tests {
         // All scans should be for component 0
         for scan in &scans {
             for i in 0..scan.comps_in_scan as usize {
-                assert_eq!(scan.component_index[i], 0, "Grayscale scans should only use component 0");
+                assert_eq!(
+                    scan.component_index[i], 0,
+                    "Grayscale scans should only use component 0"
+                );
             }
         }
     }
@@ -627,12 +647,17 @@ mod tests {
         let scans = result.build_final_scans(3, &config);
 
         // Count refinement scans (ah > 0)
-        let luma_refinements: Vec<_> = scans.iter()
+        let luma_refinements: Vec<_> = scans
+            .iter()
             .filter(|s| s.component_index[0] == 0 && s.ah > 0)
             .collect();
 
         // Should have refinements from Al=2 to Al=1 and Al=1 to Al=0
-        assert_eq!(luma_refinements.len(), 2, "Should have 2 luma refinement scans for Al=2");
+        assert_eq!(
+            luma_refinements.len(),
+            2,
+            "Should have 2 luma refinement scans for Al=2"
+        );
     }
 
     #[test]

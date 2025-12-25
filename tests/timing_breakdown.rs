@@ -6,16 +6,16 @@
 //! Run with: cargo test --release timing_breakdown -- --nocapture
 
 use mozjpeg_oxide::{
-    color, dct, quant, sample, trellis,
-    huffman::{DerivedTable, HuffTable},
-    entropy::EntropyEncoder,
     bitstream::BitWriter,
+    color,
     consts::{
-        DCTSIZE, DCTSIZE2,
-        DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES,
-        AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES,
+        AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, DCTSIZE, DCTSIZE2, DC_LUMINANCE_BITS,
+        DC_LUMINANCE_VALUES,
     },
-    QuantTableIdx, TrellisConfig,
+    dct,
+    entropy::EntropyEncoder,
+    huffman::{DerivedTable, HuffTable},
+    quant, sample, trellis, QuantTableIdx, TrellisConfig,
 };
 use std::time::Instant;
 
@@ -62,7 +62,10 @@ fn timing_breakdown_baseline() {
     const HEIGHT: usize = 512;
     const ITERATIONS: usize = 10;
 
-    println!("\n=== Encoder Timing Breakdown ({}x{}, {} iterations) ===\n", WIDTH, HEIGHT, ITERATIONS);
+    println!(
+        "\n=== Encoder Timing Breakdown ({}x{}, {} iterations) ===\n",
+        WIDTH, HEIGHT, ITERATIONS
+    );
 
     let rgb = create_test_image(WIDTH, HEIGHT);
     let num_pixels = WIDTH * HEIGHT;
@@ -74,7 +77,8 @@ fn timing_breakdown_baseline() {
 
     // Subsampling 4:2:0
     let (luma_h, luma_v) = (2usize, 2usize);
-    let (chroma_width, chroma_height) = sample::subsampled_dimensions(WIDTH, HEIGHT, luma_h, luma_v);
+    let (chroma_width, chroma_height) =
+        sample::subsampled_dimensions(WIDTH, HEIGHT, luma_h, luma_v);
     let chroma_size = chroma_width * chroma_height;
     let mut cb_subsampled = vec![0u8; chroma_size];
     let mut cr_subsampled = vec![0u8; chroma_size];
@@ -87,7 +91,8 @@ fn timing_breakdown_baseline() {
     let mut cr_mcu = vec![0u8; mcu_chroma_w * mcu_chroma_h];
 
     // Quant tables
-    let (luma_qtable, _chroma_qtable) = quant::create_quant_tables(85, QuantTableIdx::ImageMagick, true);
+    let (luma_qtable, _chroma_qtable) =
+        quant::create_quant_tables(85, QuantTableIdx::ImageMagick, true);
 
     // Huffman tables
     let dc_luma_huff = create_std_dc_luma_table();
@@ -138,8 +143,22 @@ fn timing_breakdown_baseline() {
         // Stage 3: MCU expansion
         let (_, t) = timed(|| {
             sample::expand_to_mcu(&y_plane, WIDTH, HEIGHT, &mut y_mcu, mcu_width, mcu_height);
-            sample::expand_to_mcu(&cb_subsampled, chroma_width, chroma_height, &mut cb_mcu, mcu_chroma_w, mcu_chroma_h);
-            sample::expand_to_mcu(&cr_subsampled, chroma_width, chroma_height, &mut cr_mcu, mcu_chroma_w, mcu_chroma_h);
+            sample::expand_to_mcu(
+                &cb_subsampled,
+                chroma_width,
+                chroma_height,
+                &mut cb_mcu,
+                mcu_chroma_w,
+                mcu_chroma_h,
+            );
+            sample::expand_to_mcu(
+                &cr_subsampled,
+                chroma_width,
+                chroma_height,
+                &mut cr_mcu,
+                mcu_chroma_w,
+                mcu_chroma_h,
+            );
         });
         expand_time += t;
 
@@ -193,7 +212,9 @@ fn timing_breakdown_baseline() {
             let mut encoder = EntropyEncoder::new(&mut bit_writer);
 
             for block in &y_blocks {
-                encoder.encode_block(block, 0, &dc_luma_derived, &ac_luma_derived).unwrap();
+                encoder
+                    .encode_block(block, 0, &dc_luma_derived, &ac_luma_derived)
+                    .unwrap();
             }
             bit_writer.flush().unwrap();
         });
@@ -211,17 +232,44 @@ fn timing_breakdown_baseline() {
 
     println!("| Stage            | Time (µs) | % of Total |");
     println!("|------------------|-----------|------------|");
-    println!("| Color conversion | {:>9} | {:>9.1}% |", color_avg, 100.0 * color_avg as f64 / total_avg as f64);
-    println!("| Downsampling     | {:>9} | {:>9.1}% |", downsample_avg, 100.0 * downsample_avg as f64 / total_avg as f64);
-    println!("| MCU expansion    | {:>9} | {:>9.1}% |", expand_avg, 100.0 * expand_avg as f64 / total_avg as f64);
-    println!("| Forward DCT      | {:>9} | {:>9.1}% |", dct_avg, 100.0 * dct_avg as f64 / total_avg as f64);
-    println!("| Quantization     | {:>9} | {:>9.1}% |", quant_avg, 100.0 * quant_avg as f64 / total_avg as f64);
-    println!("| Entropy encoding | {:>9} | {:>9.1}% |", entropy_avg, 100.0 * entropy_avg as f64 / total_avg as f64);
+    println!(
+        "| Color conversion | {:>9} | {:>9.1}% |",
+        color_avg,
+        100.0 * color_avg as f64 / total_avg as f64
+    );
+    println!(
+        "| Downsampling     | {:>9} | {:>9.1}% |",
+        downsample_avg,
+        100.0 * downsample_avg as f64 / total_avg as f64
+    );
+    println!(
+        "| MCU expansion    | {:>9} | {:>9.1}% |",
+        expand_avg,
+        100.0 * expand_avg as f64 / total_avg as f64
+    );
+    println!(
+        "| Forward DCT      | {:>9} | {:>9.1}% |",
+        dct_avg,
+        100.0 * dct_avg as f64 / total_avg as f64
+    );
+    println!(
+        "| Quantization     | {:>9} | {:>9.1}% |",
+        quant_avg,
+        100.0 * quant_avg as f64 / total_avg as f64
+    );
+    println!(
+        "| Entropy encoding | {:>9} | {:>9.1}% |",
+        entropy_avg,
+        100.0 * entropy_avg as f64 / total_avg as f64
+    );
     println!("|------------------|-----------|------------|");
     println!("| **Total**        | {:>9} | {:>9.1}% |", total_avg, 100.0);
     println!();
     println!("Block count: {} Y blocks", total_y_blocks);
-    println!("DCT per block: {:.1} ns", (dct_avg as f64 * 1000.0) / total_y_blocks as f64);
+    println!(
+        "DCT per block: {:.1} ns",
+        (dct_avg as f64 * 1000.0) / total_y_blocks as f64
+    );
     println!();
 }
 
@@ -231,7 +279,10 @@ fn timing_breakdown_trellis() {
     const HEIGHT: usize = 512;
     const ITERATIONS: usize = 5;
 
-    println!("\n=== Trellis Timing Breakdown ({}x{}, {} iterations) ===\n", WIDTH, HEIGHT, ITERATIONS);
+    println!(
+        "\n=== Trellis Timing Breakdown ({}x{}, {} iterations) ===\n",
+        WIDTH, HEIGHT, ITERATIONS
+    );
 
     let rgb = create_test_image(WIDTH, HEIGHT);
     let num_pixels = WIDTH * HEIGHT;
@@ -243,7 +294,8 @@ fn timing_breakdown_trellis() {
 
     // Subsampling 4:2:0
     let (luma_h, luma_v) = (2usize, 2usize);
-    let (chroma_width, chroma_height) = sample::subsampled_dimensions(WIDTH, HEIGHT, luma_h, luma_v);
+    let (chroma_width, chroma_height) =
+        sample::subsampled_dimensions(WIDTH, HEIGHT, luma_h, luma_v);
     let chroma_size = chroma_width * chroma_height;
     let mut cb_subsampled = vec![0u8; chroma_size];
     let mut cr_subsampled = vec![0u8; chroma_size];
@@ -256,7 +308,8 @@ fn timing_breakdown_trellis() {
     let mut cr_mcu = vec![0u8; mcu_chroma_w * mcu_chroma_h];
 
     // Quant tables
-    let (luma_qtable, _chroma_qtable) = quant::create_quant_tables(85, QuantTableIdx::ImageMagick, true);
+    let (luma_qtable, _chroma_qtable) =
+        quant::create_quant_tables(85, QuantTableIdx::ImageMagick, true);
 
     // Huffman tables
     let dc_luma_huff = create_std_dc_luma_table();
@@ -287,12 +340,33 @@ fn timing_breakdown_trellis() {
     for _ in 0..ITERATIONS {
         // Stage 1: Preparation (color + downsample + expand)
         let (_, t) = timed(|| {
-            color::convert_rgb_to_ycbcr(&rgb, &mut y_plane, &mut cb_plane, &mut cr_plane, WIDTH, HEIGHT);
+            color::convert_rgb_to_ycbcr(
+                &rgb,
+                &mut y_plane,
+                &mut cb_plane,
+                &mut cr_plane,
+                WIDTH,
+                HEIGHT,
+            );
             sample::downsample_plane(&cb_plane, WIDTH, HEIGHT, luma_h, luma_v, &mut cb_subsampled);
             sample::downsample_plane(&cr_plane, WIDTH, HEIGHT, luma_h, luma_v, &mut cr_subsampled);
             sample::expand_to_mcu(&y_plane, WIDTH, HEIGHT, &mut y_mcu, mcu_width, mcu_height);
-            sample::expand_to_mcu(&cb_subsampled, chroma_width, chroma_height, &mut cb_mcu, mcu_chroma_w, mcu_chroma_h);
-            sample::expand_to_mcu(&cr_subsampled, chroma_width, chroma_height, &mut cr_mcu, mcu_chroma_w, mcu_chroma_h);
+            sample::expand_to_mcu(
+                &cb_subsampled,
+                chroma_width,
+                chroma_height,
+                &mut cb_mcu,
+                mcu_chroma_w,
+                mcu_chroma_h,
+            );
+            sample::expand_to_mcu(
+                &cr_subsampled,
+                chroma_width,
+                chroma_height,
+                &mut cr_mcu,
+                mcu_chroma_w,
+                mcu_chroma_h,
+            );
         });
         prep_time += t;
 
@@ -352,7 +426,9 @@ fn timing_breakdown_trellis() {
             let mut encoder = EntropyEncoder::new(&mut bit_writer);
 
             for block in &y_blocks {
-                encoder.encode_block(block, 0, &dc_luma_derived, &ac_luma_derived).unwrap();
+                encoder
+                    .encode_block(block, 0, &dc_luma_derived, &ac_luma_derived)
+                    .unwrap();
             }
             bit_writer.flush().unwrap();
         });
@@ -368,14 +444,36 @@ fn timing_breakdown_trellis() {
 
     println!("| Stage              | Time (µs) | % of Total |");
     println!("|--------------------|-----------|------------|");
-    println!("| Prep (color+down)  | {:>9} | {:>9.1}% |", prep_avg, 100.0 * prep_avg as f64 / total_avg as f64);
-    println!("| Forward DCT        | {:>9} | {:>9.1}% |", dct_avg, 100.0 * dct_avg as f64 / total_avg as f64);
-    println!("| Trellis quant      | {:>9} | {:>9.1}% |", trellis_avg, 100.0 * trellis_avg as f64 / total_avg as f64);
-    println!("| Entropy encoding   | {:>9} | {:>9.1}% |", entropy_avg, 100.0 * entropy_avg as f64 / total_avg as f64);
+    println!(
+        "| Prep (color+down)  | {:>9} | {:>9.1}% |",
+        prep_avg,
+        100.0 * prep_avg as f64 / total_avg as f64
+    );
+    println!(
+        "| Forward DCT        | {:>9} | {:>9.1}% |",
+        dct_avg,
+        100.0 * dct_avg as f64 / total_avg as f64
+    );
+    println!(
+        "| Trellis quant      | {:>9} | {:>9.1}% |",
+        trellis_avg,
+        100.0 * trellis_avg as f64 / total_avg as f64
+    );
+    println!(
+        "| Entropy encoding   | {:>9} | {:>9.1}% |",
+        entropy_avg,
+        100.0 * entropy_avg as f64 / total_avg as f64
+    );
     println!("|--------------------|-----------|------------|");
-    println!("| **Total**          | {:>9} | {:>9.1}% |", total_avg, 100.0);
+    println!(
+        "| **Total**          | {:>9} | {:>9.1}% |",
+        total_avg, 100.0
+    );
     println!();
     println!("Block count: {} Y blocks", total_y_blocks);
-    println!("Trellis per block: {:.1} µs", trellis_avg as f64 / total_y_blocks as f64);
+    println!(
+        "Trellis per block: {:.1} µs",
+        trellis_avg as f64 / total_y_blocks as f64
+    );
     println!();
 }

@@ -288,7 +288,10 @@ pub fn compare_decoded(rust_jpeg: &[u8], c_jpeg: &[u8]) -> CompareResult {
 /// Decode JPEG using external decoder.
 /// Note: jpeg_decoder is a dev-dependency, so this won't work in the main crate.
 /// For test usage, import jpeg_decoder in your test and use this helper.
-pub fn decode_with_decoder<D: JpegDecoder>(data: &[u8], decoder: &D) -> Option<(Vec<u8>, usize, usize)> {
+pub fn decode_with_decoder<D: JpegDecoder>(
+    data: &[u8],
+    decoder: &D,
+) -> Option<(Vec<u8>, usize, usize)> {
     decoder.decode(data)
 }
 
@@ -523,7 +526,10 @@ mod tests {
 
         let presets = [
             ("baseline", TestEncoderConfig::baseline()),
-            ("baseline_huffman", TestEncoderConfig::baseline_huffman_opt()),
+            (
+                "baseline_huffman",
+                TestEncoderConfig::baseline_huffman_opt(),
+            ),
             ("rust_defaults", TestEncoderConfig::rust_defaults()),
             ("max_compression", TestEncoderConfig::max_compression()),
         ];
@@ -535,7 +541,12 @@ mod tests {
             assert!(!rust_jpeg.is_empty(), "{}: Rust encoding failed", name);
             assert!(!c_jpeg.is_empty(), "{}: C encoding failed", name);
 
-            println!("{}: Rust={} bytes, C={} bytes", name, rust_jpeg.len(), c_jpeg.len());
+            println!(
+                "{}: Rust={} bytes, C={} bytes",
+                name,
+                rust_jpeg.len(),
+                c_jpeg.len()
+            );
         }
     }
 }

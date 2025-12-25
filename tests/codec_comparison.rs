@@ -44,7 +44,12 @@ fn rust_encode_progressive(data: &[u8], width: u32, height: u32, quality: u8) ->
 
 /// Encode using C mozjpeg via FFI with TestEncoderConfig.
 /// This mirrors the encode_c function in test_encoder.rs.
-fn encode_c_with_config(rgb: &[u8], width: u32, height: u32, config: &TestEncoderConfig) -> Vec<u8> {
+fn encode_c_with_config(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    config: &TestEncoderConfig,
+) -> Vec<u8> {
     use mozjpeg_sys::*;
     use std::ptr;
 
@@ -161,7 +166,9 @@ fn create_noise_image(width: u32, height: u32, seed: u64) -> Vec<u8> {
     let mut state = seed;
     for pixel in data.iter_mut() {
         // Simple LCG PRNG
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         *pixel = (state >> 56) as u8;
     }
     data
@@ -298,10 +305,7 @@ fn compare_jpeg_bytes(jpeg_a: &[u8], jpeg_b: &[u8]) -> (usize, Option<usize>, us
         .filter(|(_, (a, b))| a != b)
         .count();
 
-    let first_diff = jpeg_a
-        .iter()
-        .zip(jpeg_b.iter())
-        .position(|(a, b)| a != b);
+    let first_diff = jpeg_a.iter().zip(jpeg_b.iter()).position(|(a, b)| a != b);
 
     (differing, first_diff, common_prefix)
 }
@@ -384,7 +388,8 @@ fn test_rust_vs_c_baseline_quality_sweep() {
             assert!(
                 rust_vs_c_dssim < 0.001,
                 "Rust vs C DSSIM too high at Q{}: {:.6} (should be < 0.001)",
-                quality, rust_vs_c_dssim
+                quality,
+                rust_vs_c_dssim
             );
 
             // Verify quality is similar to reference (within 50% of C)
@@ -393,7 +398,9 @@ fn test_rust_vs_c_baseline_quality_sweep() {
                 assert!(
                     rust_dssim < c_dssim * 1.5,
                     "Rust DSSIM too high at Q{}: {:.6} vs C {:.6}",
-                    quality, rust_dssim, c_dssim
+                    quality,
+                    rust_dssim,
+                    c_dssim
                 );
             }
 
@@ -402,7 +409,10 @@ fn test_rust_vs_c_baseline_quality_sweep() {
             assert!(
                 ratio < 1.10 && ratio > 0.90,
                 "File size ratio out of range: {:.2}% for {}x{} Q{}",
-                ratio * 100.0, width, height, quality
+                ratio * 100.0,
+                width,
+                height,
+                quality
             );
         }
         println!();
@@ -456,7 +466,11 @@ fn test_rust_vs_c_progressive_quality_sweep() {
                 rust_dssim,
                 c_dssim,
                 rust_vs_c_dssim,
-                if rust_vs_c_dssim > 0.001 { " *** BUG" } else { "" }
+                if rust_vs_c_dssim > 0.001 {
+                    " *** BUG"
+                } else {
+                    ""
+                }
             );
 
             // Strict DSSIM tolerance - decoded images should be nearly identical
@@ -581,7 +595,10 @@ fn test_real_photo_baseline() {
         if max_diff > 0 {
             println!(
                 "         Pixel diff: max={}, avg={:.2}, changed={}/{}",
-                max_diff, avg_diff, pixels_diff, image.len()
+                max_diff,
+                avg_diff,
+                pixels_diff,
+                image.len()
             );
         }
 
@@ -590,14 +607,16 @@ fn test_real_photo_baseline() {
         assert!(
             rust_vs_c_dssim < 0.001,
             "Rust vs C DSSIM too high at Q{}: {:.6} (should be < 0.001)",
-            quality, rust_vs_c_dssim
+            quality,
+            rust_vs_c_dssim
         );
 
         // Verify file size is within 5% of C mozjpeg (strict for real photos)
         assert!(
             ratio < 1.05 && ratio > 0.95,
             "File size ratio out of range at Q{}: {:.2}%",
-            quality, ratio * 100.0
+            quality,
+            ratio * 100.0
         );
     }
 
@@ -648,7 +667,8 @@ fn test_different_image_types() {
         assert!(
             rust_vs_c_dssim < 0.001,
             "{}: Rust vs C DSSIM too high: {:.6}",
-            name, rust_vs_c_dssim
+            name,
+            rust_vs_c_dssim
         );
     }
 }
@@ -689,8 +709,16 @@ fn test_single_mcu_progressive() {
     let rust_vs_c = compare_jpeg_dssim(&rust_prog, &c_prog);
 
     println!("Results:");
-    println!("  Rust baseline:    {} bytes, DSSIM={:.6}", rust_base.len(), rust_base_dssim);
-    println!("  Rust progressive: {} bytes, DSSIM={:.6}", rust_prog.len(), rust_prog_dssim);
+    println!(
+        "  Rust baseline:    {} bytes, DSSIM={:.6}",
+        rust_base.len(),
+        rust_base_dssim
+    );
+    println!(
+        "  Rust progressive: {} bytes, DSSIM={:.6}",
+        rust_prog.len(),
+        rust_prog_dssim
+    );
     println!("  C progressive:    {} bytes", c_prog.len());
     println!("\n  Rust prog vs Rust base DSSIM: {:.6}", rust_vs_base);
     println!("  Rust prog vs C prog DSSIM:    {:.6}", rust_vs_c);
@@ -794,7 +822,14 @@ fn test_progressive_mcu_bug() {
     let solid_base_dssim = decode_and_dssim(&solid_base, &solid_image, 32, 16);
     println!("  Solid baseline DSSIM: {:.6}", solid_base_dssim);
     println!("  Solid progressive DSSIM: {:.6}", solid_prog_dssim);
-    println!("  Bug present: {}", if (solid_prog_dssim - solid_base_dssim).abs() > 0.001 { "YES" } else { "NO" });
+    println!(
+        "  Bug present: {}",
+        if (solid_prog_dssim - solid_base_dssim).abs() > 0.001 {
+            "YES"
+        } else {
+            "NO"
+        }
+    );
 
     println!("\n--- Test 2: Photo-like image ---");
     // Test the simplest failing case: 32x16 (2 MCU columns x 1 row)
@@ -809,7 +844,7 @@ fn test_progressive_mcu_bug() {
         .quality(quality)
         .subsampling(mozjpeg_oxide::Subsampling::S420)
         .progressive(true)
-        .optimize_huffman(false)  // Simpler to debug
+        .optimize_huffman(false) // Simpler to debug
         .trellis(mozjpeg_oxide::TrellisConfig::disabled())
         .encode_rgb(&image, width, height)
         .expect("Rust progressive failed");
@@ -844,8 +879,11 @@ fn test_progressive_mcu_bug() {
 
     // Compare Rust progressive vs C progressive
     let rust_vs_c = compare_jpeg_dssim(&rust_prog, &c_prog);
-    println!("\nRust prog vs C prog DSSIM: {:.6} {}", rust_vs_c,
-        if rust_vs_c > 0.001 { "*** BUG" } else { "(OK)" });
+    println!(
+        "\nRust prog vs C prog DSSIM: {:.6} {}",
+        rust_vs_c,
+        if rust_vs_c > 0.001 { "*** BUG" } else { "(OK)" }
+    );
 
     // Byte comparison
     let (diff_bytes, first_diff, common_prefix) = compare_jpeg_bytes(&rust_prog, &c_prog);
@@ -859,14 +897,25 @@ fn test_progressive_mcu_bug() {
         let start = diff_pos.saturating_sub(4);
         let end_r = (diff_pos + 8).min(rust_prog.len());
         let end_c = (diff_pos + 8).min(c_prog.len());
-        println!("\n  Rust bytes @{}-{}: {:02X?}", start, end_r, &rust_prog[start..end_r]);
-        println!("  C    bytes @{}-{}: {:02X?}", start, end_c, &c_prog[start..end_c]);
+        println!(
+            "\n  Rust bytes @{}-{}: {:02X?}",
+            start,
+            end_r,
+            &rust_prog[start..end_r]
+        );
+        println!(
+            "  C    bytes @{}-{}: {:02X?}",
+            start,
+            end_c,
+            &c_prog[start..end_c]
+        );
     }
 
     // Show JPEG structure for both files
     println!("\n  Rust file structure ({} bytes):", rust_prog.len());
     for (i, &b) in rust_prog.iter().enumerate() {
-        if b == 0xFF && i + 1 < rust_prog.len() && rust_prog[i + 1] != 0 && rust_prog[i + 1] != 0xFF {
+        if b == 0xFF && i + 1 < rust_prog.len() && rust_prog[i + 1] != 0 && rust_prog[i + 1] != 0xFF
+        {
             let m = rust_prog[i + 1];
             let name = match m {
                 0xD8 => "SOI",
@@ -877,7 +926,7 @@ fn test_progressive_mcu_bug() {
                 0xC4 => "DHT",
                 0xDA => "SOS",
                 0xD9 => "EOI",
-                _ => "other"
+                _ => "other",
             };
             println!("    {:>4}: 0xFF{:02X} ({})", i, m, name);
         }
@@ -895,7 +944,7 @@ fn test_progressive_mcu_bug() {
                 0xC4 => "DHT",
                 0xDA => "SOS",
                 0xD9 => "EOI",
-                _ => "other"
+                _ => "other",
             };
             println!("    {:>4}: 0xFF{:02X} ({})", i, m, name);
         }
@@ -906,7 +955,11 @@ fn test_progressive_mcu_bug() {
     println!("\nDecoded pixel comparison:");
     println!("  Max pixel diff: {}", max_diff);
     println!("  Avg pixel diff: {:.4}", avg_diff);
-    println!("  Pixels different: {} / {}", pixels_diff, width * height * 3);
+    println!(
+        "  Pixels different: {} / {}",
+        pixels_diff,
+        width * height * 3
+    );
 
     // Show where the corruption is in the image
     println!("\n=== Pixel difference map (Rust prog vs baseline) ===");
@@ -927,14 +980,19 @@ fn test_progressive_mcu_bug() {
                     for c in 0..3 {
                         let idx = ((y * width + x) * 3 + c) as usize;
                         if idx < decoded_base.len() && idx < decoded_prog.len() {
-                            let diff = (decoded_base[idx] as i16 - decoded_prog[idx] as i16).unsigned_abs() as u64;
+                            let diff = (decoded_base[idx] as i16 - decoded_prog[idx] as i16)
+                                .unsigned_abs() as u64;
                             block_diff += diff;
                             count += 1;
                         }
                     }
                 }
             }
-            let avg = if count > 0 { block_diff as f64 / count as f64 } else { 0.0 };
+            let avg = if count > 0 {
+                block_diff as f64 / count as f64
+            } else {
+                0.0
+            };
             print!("{:>6.1} ", avg);
         }
         println!();
@@ -988,9 +1046,20 @@ fn test_progressive_mcu_bug() {
 
     // Now test across sizes to confirm the pattern
     println!("\n=== Width vs height sweep ===");
-    println!("{:<12} {:>12} {:>12} {:>12}", "Size", "Rust DSSIM", "C DSSIM", "R vs C");
+    println!(
+        "{:<12} {:>12} {:>12} {:>12}",
+        "Size", "Rust DSSIM", "C DSSIM", "R vs C"
+    );
 
-    for (w, h) in [(16, 16), (32, 16), (16, 32), (64, 16), (16, 64), (32, 32), (64, 64)] {
+    for (w, h) in [
+        (16, 16),
+        (32, 16),
+        (16, 32),
+        (64, 16),
+        (16, 64),
+        (32, 32),
+        (64, 64),
+    ] {
         let test_img = create_photo_like_image(w, h);
 
         let r = mozjpeg_oxide::Encoder::new()
@@ -1007,15 +1076,17 @@ fn test_progressive_mcu_bug() {
         let c_dssim = decode_and_dssim(&c, &test_img, w, h);
         let r_vs_c = compare_jpeg_dssim(&r, &c);
 
-        let mcu_cols = (w + 15) / 16;  // With 4:2:0
+        let mcu_cols = (w + 15) / 16; // With 4:2:0
         let mcu_rows = (h + 15) / 16;
 
-        println!("{:<12} {:>12.6} {:>12.6} {:>12.6} ({}x{} MCUs){}",
+        println!(
+            "{:<12} {:>12.6} {:>12.6} {:>12.6} ({}x{} MCUs){}",
             format!("{}x{}", w, h),
             rust_dssim,
             c_dssim,
             r_vs_c,
-            mcu_cols, mcu_rows,
+            mcu_cols,
+            mcu_rows,
             if r_vs_c > 0.001 { " *** BUG" } else { "" }
         );
     }
@@ -1054,7 +1125,7 @@ fn test_subsampling_modes() {
         let rust_encoded = mozjpeg_oxide::Encoder::new()
             .quality(quality)
             .subsampling(subsampling)
-            .progressive(false)  // Use baseline which works
+            .progressive(false) // Use baseline which works
             .optimize_huffman(true)
             .encode_rgb(&image, width, height)
             .expect("Rust encoding failed");
@@ -1076,7 +1147,8 @@ fn test_subsampling_modes() {
         assert!(
             rust_vs_c < 0.001,
             "{}: Rust vs C DSSIM too high: {:.6}",
-            name, rust_vs_c
+            name,
+            rust_vs_c
         );
     }
 }

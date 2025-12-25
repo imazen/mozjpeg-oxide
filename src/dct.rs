@@ -27,18 +27,18 @@ const CONST_BITS: i32 = 13;
 const PASS1_BITS: i32 = 2;
 
 // Pre-calculated fixed-point constants: FIX(x) = (x * (1 << CONST_BITS) + 0.5)
-const FIX_0_298631336: i32 = 2446;   // FIX(0.298631336)
-const FIX_0_390180644: i32 = 3196;   // FIX(0.390180644)
-const FIX_0_541196100: i32 = 4433;   // FIX(0.541196100)
-const FIX_0_765366865: i32 = 6270;   // FIX(0.765366865)
-const FIX_0_899976223: i32 = 7373;   // FIX(0.899976223)
-const FIX_1_175875602: i32 = 9633;   // FIX(1.175875602)
-const FIX_1_501321110: i32 = 12299;  // FIX(1.501321110)
-const FIX_1_847759065: i32 = 15137;  // FIX(1.847759065)
-const FIX_1_961570560: i32 = 16069;  // FIX(1.961570560)
-const FIX_2_053119869: i32 = 16819;  // FIX(2.053119869)
-const FIX_2_562915447: i32 = 20995;  // FIX(2.562915447)
-const FIX_3_072711026: i32 = 25172;  // FIX(3.072711026)
+const FIX_0_298631336: i32 = 2446; // FIX(0.298631336)
+const FIX_0_390180644: i32 = 3196; // FIX(0.390180644)
+const FIX_0_541196100: i32 = 4433; // FIX(0.541196100)
+const FIX_0_765366865: i32 = 6270; // FIX(0.765366865)
+const FIX_0_899976223: i32 = 7373; // FIX(0.899976223)
+const FIX_1_175875602: i32 = 9633; // FIX(1.175875602)
+const FIX_1_501321110: i32 = 12299; // FIX(1.501321110)
+const FIX_1_847759065: i32 = 15137; // FIX(1.847759065)
+const FIX_1_961570560: i32 = 16069; // FIX(1.961570560)
+const FIX_2_053119869: i32 = 16819; // FIX(2.053119869)
+const FIX_2_562915447: i32 = 20995; // FIX(2.562915447)
+const FIX_3_072711026: i32 = 25172; // FIX(3.072711026)
 
 /// DESCALE: Right-shift with rounding (used to remove fixed-point scaling)
 #[inline]
@@ -102,14 +102,14 @@ pub fn forward_dct_8x8(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) 
         let z4 = tmp5 + tmp7;
         let z5 = (z3 + z4) * FIX_1_175875602; // sqrt(2) * c3
 
-        let tmp4 = tmp4 * FIX_0_298631336;  // sqrt(2) * (-c1+c3+c5-c7)
-        let tmp5 = tmp5 * FIX_2_053119869;  // sqrt(2) * ( c1+c3-c5+c7)
-        let tmp6 = tmp6 * FIX_3_072711026;  // sqrt(2) * ( c1+c3+c5-c7)
-        let tmp7 = tmp7 * FIX_1_501321110;  // sqrt(2) * ( c1+c3-c5-c7)
-        let z1 = z1 * (-FIX_0_899976223);   // sqrt(2) * ( c7-c3)
-        let z2 = z2 * (-FIX_2_562915447);   // sqrt(2) * (-c1-c3)
-        let z3 = z3 * (-FIX_1_961570560) + z5;  // sqrt(2) * (-c3-c5)
-        let z4 = z4 * (-FIX_0_390180644) + z5;  // sqrt(2) * ( c5-c3)
+        let tmp4 = tmp4 * FIX_0_298631336; // sqrt(2) * (-c1+c3+c5-c7)
+        let tmp5 = tmp5 * FIX_2_053119869; // sqrt(2) * ( c1+c3-c5+c7)
+        let tmp6 = tmp6 * FIX_3_072711026; // sqrt(2) * ( c1+c3+c5-c7)
+        let tmp7 = tmp7 * FIX_1_501321110; // sqrt(2) * ( c1+c3-c5-c7)
+        let z1 = z1 * (-FIX_0_899976223); // sqrt(2) * ( c7-c3)
+        let z2 = z2 * (-FIX_2_562915447); // sqrt(2) * (-c1-c3)
+        let z3 = z3 * (-FIX_1_961570560) + z5; // sqrt(2) * (-c3-c5)
+        let z4 = z4 * (-FIX_0_390180644) + z5; // sqrt(2) * ( c5-c3)
 
         data[base + 7] = descale(tmp4 + z1 + z3, CONST_BITS - PASS1_BITS);
         data[base + 5] = descale(tmp5 + z2 + z4, CONST_BITS - PASS1_BITS);
@@ -197,8 +197,14 @@ const SIMD_NEG_FIX_2_562915447: i32x4 = i32x4::new([-FIX_2_562915447; 4]);
 /// Fully inlined for performance - no function call overhead.
 #[inline(always)]
 fn dct_1d_simd(
-    d0: i32x4, d1: i32x4, d2: i32x4, d3: i32x4,
-    d4: i32x4, d5: i32x4, d6: i32x4, d7: i32x4,
+    d0: i32x4,
+    d1: i32x4,
+    d2: i32x4,
+    d3: i32x4,
+    d4: i32x4,
+    d5: i32x4,
+    d6: i32x4,
+    d7: i32x4,
     shift_pass1: bool,
 ) -> [i32x4; 8] {
     // Even part
@@ -256,7 +262,11 @@ fn dct_1d_simd(
     let z3 = z3 * SIMD_NEG_FIX_1_961570560 + z5;
     let z4 = z4 * SIMD_NEG_FIX_0_390180644 + z5;
 
-    let scale = if shift_pass1 { CONST_BITS - PASS1_BITS } else { CONST_BITS + PASS1_BITS };
+    let scale = if shift_pass1 {
+        CONST_BITS - PASS1_BITS
+    } else {
+        CONST_BITS + PASS1_BITS
+    };
     let out7 = descale_simd(tmp4 + neg_z1 + z3, scale);
     let out5 = descale_simd(tmp5 + neg_z2 + z4, scale);
     let out3 = descale_simd(tmp6 + neg_z2 + z3, scale);
@@ -307,19 +317,47 @@ pub fn forward_dct_8x8_simd(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZ
         let out = dct_1d_simd(col0, col1, col2, col3, col4, col5, col6, col7, true);
 
         // Scatter results back
-        let arr0 = out[0].to_array(); let arr1 = out[1].to_array();
-        let arr2 = out[2].to_array(); let arr3 = out[3].to_array();
-        let arr4 = out[4].to_array(); let arr5 = out[5].to_array();
-        let arr6 = out[6].to_array(); let arr7 = out[7].to_array();
+        let arr0 = out[0].to_array();
+        let arr1 = out[1].to_array();
+        let arr2 = out[2].to_array();
+        let arr3 = out[3].to_array();
+        let arr4 = out[4].to_array();
+        let arr5 = out[5].to_array();
+        let arr6 = out[6].to_array();
+        let arr7 = out[7].to_array();
 
-        data[0] = arr0[0]; data[1] = arr1[0]; data[2] = arr2[0]; data[3] = arr3[0];
-        data[4] = arr4[0]; data[5] = arr5[0]; data[6] = arr6[0]; data[7] = arr7[0];
-        data[8] = arr0[1]; data[9] = arr1[1]; data[10] = arr2[1]; data[11] = arr3[1];
-        data[12] = arr4[1]; data[13] = arr5[1]; data[14] = arr6[1]; data[15] = arr7[1];
-        data[16] = arr0[2]; data[17] = arr1[2]; data[18] = arr2[2]; data[19] = arr3[2];
-        data[20] = arr4[2]; data[21] = arr5[2]; data[22] = arr6[2]; data[23] = arr7[2];
-        data[24] = arr0[3]; data[25] = arr1[3]; data[26] = arr2[3]; data[27] = arr3[3];
-        data[28] = arr4[3]; data[29] = arr5[3]; data[30] = arr6[3]; data[31] = arr7[3];
+        data[0] = arr0[0];
+        data[1] = arr1[0];
+        data[2] = arr2[0];
+        data[3] = arr3[0];
+        data[4] = arr4[0];
+        data[5] = arr5[0];
+        data[6] = arr6[0];
+        data[7] = arr7[0];
+        data[8] = arr0[1];
+        data[9] = arr1[1];
+        data[10] = arr2[1];
+        data[11] = arr3[1];
+        data[12] = arr4[1];
+        data[13] = arr5[1];
+        data[14] = arr6[1];
+        data[15] = arr7[1];
+        data[16] = arr0[2];
+        data[17] = arr1[2];
+        data[18] = arr2[2];
+        data[19] = arr3[2];
+        data[20] = arr4[2];
+        data[21] = arr5[2];
+        data[22] = arr6[2];
+        data[23] = arr7[2];
+        data[24] = arr0[3];
+        data[25] = arr1[3];
+        data[26] = arr2[3];
+        data[27] = arr3[3];
+        data[28] = arr4[3];
+        data[29] = arr5[3];
+        data[30] = arr6[3];
+        data[31] = arr7[3];
     }
 
     // Pass 1: Process rows 4-7
@@ -335,19 +373,47 @@ pub fn forward_dct_8x8_simd(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZ
 
         let out = dct_1d_simd(col0, col1, col2, col3, col4, col5, col6, col7, true);
 
-        let arr0 = out[0].to_array(); let arr1 = out[1].to_array();
-        let arr2 = out[2].to_array(); let arr3 = out[3].to_array();
-        let arr4 = out[4].to_array(); let arr5 = out[5].to_array();
-        let arr6 = out[6].to_array(); let arr7 = out[7].to_array();
+        let arr0 = out[0].to_array();
+        let arr1 = out[1].to_array();
+        let arr2 = out[2].to_array();
+        let arr3 = out[3].to_array();
+        let arr4 = out[4].to_array();
+        let arr5 = out[5].to_array();
+        let arr6 = out[6].to_array();
+        let arr7 = out[7].to_array();
 
-        data[32] = arr0[0]; data[33] = arr1[0]; data[34] = arr2[0]; data[35] = arr3[0];
-        data[36] = arr4[0]; data[37] = arr5[0]; data[38] = arr6[0]; data[39] = arr7[0];
-        data[40] = arr0[1]; data[41] = arr1[1]; data[42] = arr2[1]; data[43] = arr3[1];
-        data[44] = arr4[1]; data[45] = arr5[1]; data[46] = arr6[1]; data[47] = arr7[1];
-        data[48] = arr0[2]; data[49] = arr1[2]; data[50] = arr2[2]; data[51] = arr3[2];
-        data[52] = arr4[2]; data[53] = arr5[2]; data[54] = arr6[2]; data[55] = arr7[2];
-        data[56] = arr0[3]; data[57] = arr1[3]; data[58] = arr2[3]; data[59] = arr3[3];
-        data[60] = arr4[3]; data[61] = arr5[3]; data[62] = arr6[3]; data[63] = arr7[3];
+        data[32] = arr0[0];
+        data[33] = arr1[0];
+        data[34] = arr2[0];
+        data[35] = arr3[0];
+        data[36] = arr4[0];
+        data[37] = arr5[0];
+        data[38] = arr6[0];
+        data[39] = arr7[0];
+        data[40] = arr0[1];
+        data[41] = arr1[1];
+        data[42] = arr2[1];
+        data[43] = arr3[1];
+        data[44] = arr4[1];
+        data[45] = arr5[1];
+        data[46] = arr6[1];
+        data[47] = arr7[1];
+        data[48] = arr0[2];
+        data[49] = arr1[2];
+        data[50] = arr2[2];
+        data[51] = arr3[2];
+        data[52] = arr4[2];
+        data[53] = arr5[2];
+        data[54] = arr6[2];
+        data[55] = arr7[2];
+        data[56] = arr0[3];
+        data[57] = arr1[3];
+        data[58] = arr2[3];
+        data[59] = arr3[3];
+        data[60] = arr4[3];
+        data[61] = arr5[3];
+        data[62] = arr6[3];
+        data[63] = arr7[3];
     }
 
     // Pass 2: Process columns 0-3
@@ -363,19 +429,47 @@ pub fn forward_dct_8x8_simd(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZ
 
         let out = dct_1d_simd(row0, row1, row2, row3, row4, row5, row6, row7, false);
 
-        let arr0 = out[0].to_array(); let arr1 = out[1].to_array();
-        let arr2 = out[2].to_array(); let arr3 = out[3].to_array();
-        let arr4 = out[4].to_array(); let arr5 = out[5].to_array();
-        let arr6 = out[6].to_array(); let arr7 = out[7].to_array();
+        let arr0 = out[0].to_array();
+        let arr1 = out[1].to_array();
+        let arr2 = out[2].to_array();
+        let arr3 = out[3].to_array();
+        let arr4 = out[4].to_array();
+        let arr5 = out[5].to_array();
+        let arr6 = out[6].to_array();
+        let arr7 = out[7].to_array();
 
-        data[0] = arr0[0]; data[1] = arr0[1]; data[2] = arr0[2]; data[3] = arr0[3];
-        data[8] = arr1[0]; data[9] = arr1[1]; data[10] = arr1[2]; data[11] = arr1[3];
-        data[16] = arr2[0]; data[17] = arr2[1]; data[18] = arr2[2]; data[19] = arr2[3];
-        data[24] = arr3[0]; data[25] = arr3[1]; data[26] = arr3[2]; data[27] = arr3[3];
-        data[32] = arr4[0]; data[33] = arr4[1]; data[34] = arr4[2]; data[35] = arr4[3];
-        data[40] = arr5[0]; data[41] = arr5[1]; data[42] = arr5[2]; data[43] = arr5[3];
-        data[48] = arr6[0]; data[49] = arr6[1]; data[50] = arr6[2]; data[51] = arr6[3];
-        data[56] = arr7[0]; data[57] = arr7[1]; data[58] = arr7[2]; data[59] = arr7[3];
+        data[0] = arr0[0];
+        data[1] = arr0[1];
+        data[2] = arr0[2];
+        data[3] = arr0[3];
+        data[8] = arr1[0];
+        data[9] = arr1[1];
+        data[10] = arr1[2];
+        data[11] = arr1[3];
+        data[16] = arr2[0];
+        data[17] = arr2[1];
+        data[18] = arr2[2];
+        data[19] = arr2[3];
+        data[24] = arr3[0];
+        data[25] = arr3[1];
+        data[26] = arr3[2];
+        data[27] = arr3[3];
+        data[32] = arr4[0];
+        data[33] = arr4[1];
+        data[34] = arr4[2];
+        data[35] = arr4[3];
+        data[40] = arr5[0];
+        data[41] = arr5[1];
+        data[42] = arr5[2];
+        data[43] = arr5[3];
+        data[48] = arr6[0];
+        data[49] = arr6[1];
+        data[50] = arr6[2];
+        data[51] = arr6[3];
+        data[56] = arr7[0];
+        data[57] = arr7[1];
+        data[58] = arr7[2];
+        data[59] = arr7[3];
     }
 
     // Pass 2: Process columns 4-7
@@ -391,19 +485,47 @@ pub fn forward_dct_8x8_simd(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZ
 
         let out = dct_1d_simd(row0, row1, row2, row3, row4, row5, row6, row7, false);
 
-        let arr0 = out[0].to_array(); let arr1 = out[1].to_array();
-        let arr2 = out[2].to_array(); let arr3 = out[3].to_array();
-        let arr4 = out[4].to_array(); let arr5 = out[5].to_array();
-        let arr6 = out[6].to_array(); let arr7 = out[7].to_array();
+        let arr0 = out[0].to_array();
+        let arr1 = out[1].to_array();
+        let arr2 = out[2].to_array();
+        let arr3 = out[3].to_array();
+        let arr4 = out[4].to_array();
+        let arr5 = out[5].to_array();
+        let arr6 = out[6].to_array();
+        let arr7 = out[7].to_array();
 
-        data[4] = arr0[0]; data[5] = arr0[1]; data[6] = arr0[2]; data[7] = arr0[3];
-        data[12] = arr1[0]; data[13] = arr1[1]; data[14] = arr1[2]; data[15] = arr1[3];
-        data[20] = arr2[0]; data[21] = arr2[1]; data[22] = arr2[2]; data[23] = arr2[3];
-        data[28] = arr3[0]; data[29] = arr3[1]; data[30] = arr3[2]; data[31] = arr3[3];
-        data[36] = arr4[0]; data[37] = arr4[1]; data[38] = arr4[2]; data[39] = arr4[3];
-        data[44] = arr5[0]; data[45] = arr5[1]; data[46] = arr5[2]; data[47] = arr5[3];
-        data[52] = arr6[0]; data[53] = arr6[1]; data[54] = arr6[2]; data[55] = arr6[3];
-        data[60] = arr7[0]; data[61] = arr7[1]; data[62] = arr7[2]; data[63] = arr7[3];
+        data[4] = arr0[0];
+        data[5] = arr0[1];
+        data[6] = arr0[2];
+        data[7] = arr0[3];
+        data[12] = arr1[0];
+        data[13] = arr1[1];
+        data[14] = arr1[2];
+        data[15] = arr1[3];
+        data[20] = arr2[0];
+        data[21] = arr2[1];
+        data[22] = arr2[2];
+        data[23] = arr2[3];
+        data[28] = arr3[0];
+        data[29] = arr3[1];
+        data[30] = arr3[2];
+        data[31] = arr3[3];
+        data[36] = arr4[0];
+        data[37] = arr4[1];
+        data[38] = arr4[2];
+        data[39] = arr4[3];
+        data[44] = arr5[0];
+        data[45] = arr5[1];
+        data[46] = arr5[2];
+        data[47] = arr5[3];
+        data[52] = arr6[0];
+        data[53] = arr6[1];
+        data[54] = arr6[2];
+        data[55] = arr6[3];
+        data[60] = arr7[0];
+        data[61] = arr7[1];
+        data[62] = arr7[2];
+        data[63] = arr7[3];
     }
 
     // Copy results to output - unrolled
@@ -451,8 +573,14 @@ fn descale_simd8(x: i32x8, n: i32) -> i32x8 {
 /// Each element of the vectors corresponds to a different row/column.
 #[inline(always)]
 fn dct_1d_8wide(
-    d0: i32x8, d1: i32x8, d2: i32x8, d3: i32x8,
-    d4: i32x8, d5: i32x8, d6: i32x8, d7: i32x8,
+    d0: i32x8,
+    d1: i32x8,
+    d2: i32x8,
+    d3: i32x8,
+    d4: i32x8,
+    d5: i32x8,
+    d6: i32x8,
+    d7: i32x8,
     shift_pass1: bool,
 ) -> [i32x8; 8] {
     // Even part
@@ -509,7 +637,11 @@ fn dct_1d_8wide(
     let z3 = z3 * SIMD8_NEG_FIX_1_961570560 + z5;
     let z4 = z4 * SIMD8_NEG_FIX_0_390180644 + z5;
 
-    let scale = if shift_pass1 { CONST_BITS - PASS1_BITS } else { CONST_BITS + PASS1_BITS };
+    let scale = if shift_pass1 {
+        CONST_BITS - PASS1_BITS
+    } else {
+        CONST_BITS + PASS1_BITS
+    };
     let out7 = descale_simd8(tmp4 + neg_z1 + z3, scale);
     let out5 = descale_simd8(tmp5 + neg_z2 + z4, scale);
     let out3 = descale_simd8(tmp6 + neg_z2 + z3, scale);
@@ -563,8 +695,8 @@ fn transpose_8x8(rows: &mut [i32x8; 8]) {
 /// 4. Transposes again
 /// 5. Does 1D DCT (column pass)
 ///
-/// The key insight: when we call dct_1d_8wide(rows[0], rows[1], ..., rows[7]),
-/// it combines rows[0]+rows[7], rows[1]+rows[6], etc. - that's column-wise processing.
+/// The key insight: when we call `dct_1d_8wide(rows[0], rows[1], ..., rows[7])`,
+/// it combines `rows[0]+rows[7]`, `rows[1]+rows[6]`, etc. - that's column-wise processing.
 /// To do row-wise processing, we transpose first so that rows become columns.
 ///
 /// The contiguous loads should be faster than the gather-based approach.
@@ -573,36 +705,84 @@ pub fn forward_dct_8x8_transpose(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; D
     // Each row is 8 contiguous i16 values converted to i32
     let mut data: [i32x8; 8] = [
         i32x8::new([
-            samples[0] as i32, samples[1] as i32, samples[2] as i32, samples[3] as i32,
-            samples[4] as i32, samples[5] as i32, samples[6] as i32, samples[7] as i32,
+            samples[0] as i32,
+            samples[1] as i32,
+            samples[2] as i32,
+            samples[3] as i32,
+            samples[4] as i32,
+            samples[5] as i32,
+            samples[6] as i32,
+            samples[7] as i32,
         ]),
         i32x8::new([
-            samples[8] as i32, samples[9] as i32, samples[10] as i32, samples[11] as i32,
-            samples[12] as i32, samples[13] as i32, samples[14] as i32, samples[15] as i32,
+            samples[8] as i32,
+            samples[9] as i32,
+            samples[10] as i32,
+            samples[11] as i32,
+            samples[12] as i32,
+            samples[13] as i32,
+            samples[14] as i32,
+            samples[15] as i32,
         ]),
         i32x8::new([
-            samples[16] as i32, samples[17] as i32, samples[18] as i32, samples[19] as i32,
-            samples[20] as i32, samples[21] as i32, samples[22] as i32, samples[23] as i32,
+            samples[16] as i32,
+            samples[17] as i32,
+            samples[18] as i32,
+            samples[19] as i32,
+            samples[20] as i32,
+            samples[21] as i32,
+            samples[22] as i32,
+            samples[23] as i32,
         ]),
         i32x8::new([
-            samples[24] as i32, samples[25] as i32, samples[26] as i32, samples[27] as i32,
-            samples[28] as i32, samples[29] as i32, samples[30] as i32, samples[31] as i32,
+            samples[24] as i32,
+            samples[25] as i32,
+            samples[26] as i32,
+            samples[27] as i32,
+            samples[28] as i32,
+            samples[29] as i32,
+            samples[30] as i32,
+            samples[31] as i32,
         ]),
         i32x8::new([
-            samples[32] as i32, samples[33] as i32, samples[34] as i32, samples[35] as i32,
-            samples[36] as i32, samples[37] as i32, samples[38] as i32, samples[39] as i32,
+            samples[32] as i32,
+            samples[33] as i32,
+            samples[34] as i32,
+            samples[35] as i32,
+            samples[36] as i32,
+            samples[37] as i32,
+            samples[38] as i32,
+            samples[39] as i32,
         ]),
         i32x8::new([
-            samples[40] as i32, samples[41] as i32, samples[42] as i32, samples[43] as i32,
-            samples[44] as i32, samples[45] as i32, samples[46] as i32, samples[47] as i32,
+            samples[40] as i32,
+            samples[41] as i32,
+            samples[42] as i32,
+            samples[43] as i32,
+            samples[44] as i32,
+            samples[45] as i32,
+            samples[46] as i32,
+            samples[47] as i32,
         ]),
         i32x8::new([
-            samples[48] as i32, samples[49] as i32, samples[50] as i32, samples[51] as i32,
-            samples[52] as i32, samples[53] as i32, samples[54] as i32, samples[55] as i32,
+            samples[48] as i32,
+            samples[49] as i32,
+            samples[50] as i32,
+            samples[51] as i32,
+            samples[52] as i32,
+            samples[53] as i32,
+            samples[54] as i32,
+            samples[55] as i32,
         ]),
         i32x8::new([
-            samples[56] as i32, samples[57] as i32, samples[58] as i32, samples[59] as i32,
-            samples[60] as i32, samples[61] as i32, samples[62] as i32, samples[63] as i32,
+            samples[56] as i32,
+            samples[57] as i32,
+            samples[58] as i32,
+            samples[59] as i32,
+            samples[60] as i32,
+            samples[61] as i32,
+            samples[62] as i32,
+            samples[63] as i32,
         ]),
     ];
 
@@ -613,9 +793,7 @@ pub fn forward_dct_8x8_transpose(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; D
     // Pass 1: 1D DCT on rows (we transposed, so this processes row elements)
     // dct_1d_8wide(data[0], data[1], ...) now combines columns 0+7, 1+6, etc. within each row
     let result = dct_1d_8wide(
-        data[0], data[1], data[2], data[3],
-        data[4], data[5], data[6], data[7],
-        true,
+        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], true,
     );
     data = result;
 
@@ -626,26 +804,44 @@ pub fn forward_dct_8x8_transpose(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; D
     // dct_1d_8wide(data[0], data[1], ...) now combines rows 0+7, 1+6, etc. within each column
     // Output: data[row][col] = final DCT coefficient - already row-major!
     let result = dct_1d_8wide(
-        data[0], data[1], data[2], data[3],
-        data[4], data[5], data[6], data[7],
-        false,
+        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], false,
     );
     data = result;
 
     // Store results (data is already in row-major form)
-    let arr0 = data[0].to_array(); let arr1 = data[1].to_array();
-    let arr2 = data[2].to_array(); let arr3 = data[3].to_array();
-    let arr4 = data[4].to_array(); let arr5 = data[5].to_array();
-    let arr6 = data[6].to_array(); let arr7 = data[7].to_array();
+    let arr0 = data[0].to_array();
+    let arr1 = data[1].to_array();
+    let arr2 = data[2].to_array();
+    let arr3 = data[3].to_array();
+    let arr4 = data[4].to_array();
+    let arr5 = data[5].to_array();
+    let arr6 = data[6].to_array();
+    let arr7 = data[7].to_array();
 
-    for i in 0..8 { coeffs[i] = arr0[i] as i16; }
-    for i in 0..8 { coeffs[8 + i] = arr1[i] as i16; }
-    for i in 0..8 { coeffs[16 + i] = arr2[i] as i16; }
-    for i in 0..8 { coeffs[24 + i] = arr3[i] as i16; }
-    for i in 0..8 { coeffs[32 + i] = arr4[i] as i16; }
-    for i in 0..8 { coeffs[40 + i] = arr5[i] as i16; }
-    for i in 0..8 { coeffs[48 + i] = arr6[i] as i16; }
-    for i in 0..8 { coeffs[56 + i] = arr7[i] as i16; }
+    for i in 0..8 {
+        coeffs[i] = arr0[i] as i16;
+    }
+    for i in 0..8 {
+        coeffs[8 + i] = arr1[i] as i16;
+    }
+    for i in 0..8 {
+        coeffs[16 + i] = arr2[i] as i16;
+    }
+    for i in 0..8 {
+        coeffs[24 + i] = arr3[i] as i16;
+    }
+    for i in 0..8 {
+        coeffs[32 + i] = arr4[i] as i16;
+    }
+    for i in 0..8 {
+        coeffs[40 + i] = arr5[i] as i16;
+    }
+    for i in 0..8 {
+        coeffs[48 + i] = arr6[i] as i16;
+    }
+    for i in 0..8 {
+        coeffs[56 + i] = arr7[i] as i16;
+    }
 }
 
 /// Prepare a sample block for DCT by level-shifting (centering around 0).
@@ -761,7 +957,7 @@ pub mod avx2 {
     /// Descale with rounding for pass 1 (CONST_BITS - PASS1_BITS = 11).
     #[inline(always)]
     unsafe fn descale_pass1(x: __m256i) -> __m256i {
-        const N: i32 = CONST_BITS - PASS1_BITS;  // 11
+        const N: i32 = CONST_BITS - PASS1_BITS; // 11
         let round = _mm256_set1_epi32(1 << (N - 1));
         _mm256_srai_epi32::<N>(_mm256_add_epi32(x, round))
     }
@@ -769,7 +965,7 @@ pub mod avx2 {
     /// Descale with rounding for pass 2 (CONST_BITS + PASS1_BITS = 15).
     #[inline(always)]
     unsafe fn descale_pass2(x: __m256i) -> __m256i {
-        const N: i32 = CONST_BITS + PASS1_BITS;  // 15
+        const N: i32 = CONST_BITS + PASS1_BITS; // 15
         let round = _mm256_set1_epi32(1 << (N - 1));
         _mm256_srai_epi32::<N>(_mm256_add_epi32(x, round))
     }
@@ -777,7 +973,7 @@ pub mod avx2 {
     /// Descale with rounding for PASS1_BITS = 2.
     #[inline(always)]
     unsafe fn descale_pass1_bits(x: __m256i) -> __m256i {
-        const N: i32 = PASS1_BITS;  // 2
+        const N: i32 = PASS1_BITS; // 2
         let round = _mm256_set1_epi32(1 << (N - 1));
         _mm256_srai_epi32::<N>(_mm256_add_epi32(x, round))
     }
@@ -814,14 +1010,38 @@ pub mod avx2 {
         dct_1d_pass_avx2(&mut rows, false);
 
         // Store results - pack i32 back to i16
-        _mm_storeu_si128(coeffs.as_mut_ptr().add(0) as *mut __m128i, pack_i32_to_i16(rows[0]));
-        _mm_storeu_si128(coeffs.as_mut_ptr().add(8) as *mut __m128i, pack_i32_to_i16(rows[1]));
-        _mm_storeu_si128(coeffs.as_mut_ptr().add(16) as *mut __m128i, pack_i32_to_i16(rows[2]));
-        _mm_storeu_si128(coeffs.as_mut_ptr().add(24) as *mut __m128i, pack_i32_to_i16(rows[3]));
-        _mm_storeu_si128(coeffs.as_mut_ptr().add(32) as *mut __m128i, pack_i32_to_i16(rows[4]));
-        _mm_storeu_si128(coeffs.as_mut_ptr().add(40) as *mut __m128i, pack_i32_to_i16(rows[5]));
-        _mm_storeu_si128(coeffs.as_mut_ptr().add(48) as *mut __m128i, pack_i32_to_i16(rows[6]));
-        _mm_storeu_si128(coeffs.as_mut_ptr().add(56) as *mut __m128i, pack_i32_to_i16(rows[7]));
+        _mm_storeu_si128(
+            coeffs.as_mut_ptr().add(0) as *mut __m128i,
+            pack_i32_to_i16(rows[0]),
+        );
+        _mm_storeu_si128(
+            coeffs.as_mut_ptr().add(8) as *mut __m128i,
+            pack_i32_to_i16(rows[1]),
+        );
+        _mm_storeu_si128(
+            coeffs.as_mut_ptr().add(16) as *mut __m128i,
+            pack_i32_to_i16(rows[2]),
+        );
+        _mm_storeu_si128(
+            coeffs.as_mut_ptr().add(24) as *mut __m128i,
+            pack_i32_to_i16(rows[3]),
+        );
+        _mm_storeu_si128(
+            coeffs.as_mut_ptr().add(32) as *mut __m128i,
+            pack_i32_to_i16(rows[4]),
+        );
+        _mm_storeu_si128(
+            coeffs.as_mut_ptr().add(40) as *mut __m128i,
+            pack_i32_to_i16(rows[5]),
+        );
+        _mm_storeu_si128(
+            coeffs.as_mut_ptr().add(48) as *mut __m128i,
+            pack_i32_to_i16(rows[6]),
+        );
+        _mm_storeu_si128(
+            coeffs.as_mut_ptr().add(56) as *mut __m128i,
+            pack_i32_to_i16(rows[7]),
+        );
     }
 
     /// Transpose 8x8 matrix of i32 values stored in 8 ymm registers.
@@ -908,13 +1128,25 @@ pub mod avx2 {
         let z1 = _mm256_mullo_epi32(_mm256_add_epi32(tmp12, tmp13), fix_0_541196100);
         let (out2, out6) = if pass1 {
             (
-                descale_pass1(_mm256_add_epi32(z1, _mm256_mullo_epi32(tmp13, fix_0_765366865))),
-                descale_pass1(_mm256_sub_epi32(z1, _mm256_mullo_epi32(tmp12, fix_1_847759065))),
+                descale_pass1(_mm256_add_epi32(
+                    z1,
+                    _mm256_mullo_epi32(tmp13, fix_0_765366865),
+                )),
+                descale_pass1(_mm256_sub_epi32(
+                    z1,
+                    _mm256_mullo_epi32(tmp12, fix_1_847759065),
+                )),
             )
         } else {
             (
-                descale_pass2(_mm256_add_epi32(z1, _mm256_mullo_epi32(tmp13, fix_0_765366865))),
-                descale_pass2(_mm256_sub_epi32(z1, _mm256_mullo_epi32(tmp12, fix_1_847759065))),
+                descale_pass2(_mm256_add_epi32(
+                    z1,
+                    _mm256_mullo_epi32(tmp13, fix_0_765366865),
+                )),
+                descale_pass2(_mm256_sub_epi32(
+                    z1,
+                    _mm256_mullo_epi32(tmp12, fix_1_847759065),
+                )),
             )
         };
 
@@ -981,7 +1213,7 @@ mod tests {
         samples2[0] = 255;
         samples2[1] = 0;
         level_shift(&samples2, &mut output);
-        assert_eq!(output[0], 127);  // 255 - 128
+        assert_eq!(output[0], 127); // 255 - 128
         assert_eq!(output[1], -128); // 0 - 128
     }
 
@@ -1000,13 +1232,19 @@ mod tests {
 
         // DC should be 8 * 8 * value = 64 * value = 6400
         // (Factor of 8 from row pass and factor of 8 from column pass)
-        assert_eq!(coeffs[0], 6400, "DC coefficient should be 64 * input value for flat block");
+        assert_eq!(
+            coeffs[0], 6400,
+            "DC coefficient should be 64 * input value for flat block"
+        );
 
         // All AC coefficients should be 0 (or very close due to rounding)
         for i in 1..DCTSIZE2 {
-            assert!(coeffs[i].abs() <= 1,
+            assert!(
+                coeffs[i].abs() <= 1,
                 "AC coefficient [{}] should be ~0 for flat block, got {}",
-                i, coeffs[i]);
+                i,
+                coeffs[i]
+            );
         }
     }
 
@@ -1018,7 +1256,11 @@ mod tests {
 
         // All coefficients should be 0
         for i in 0..DCTSIZE2 {
-            assert_eq!(coeffs[i], 0, "Coefficient [{}] should be 0 for zero block", i);
+            assert_eq!(
+                coeffs[i], 0,
+                "Coefficient [{}] should be 0 for zero block",
+                i
+            );
         }
     }
 
@@ -1046,7 +1288,11 @@ mod tests {
         for row in 1..DCTSIZE {
             max_vertical_ac = max_vertical_ac.max(coeffs[row * DCTSIZE].abs());
         }
-        assert!(max_vertical_ac > 50, "Vertical AC frequencies should be present, got {}", max_vertical_ac);
+        assert!(
+            max_vertical_ac > 50,
+            "Vertical AC frequencies should be present, got {}",
+            max_vertical_ac
+        );
     }
 
     #[test]
@@ -1064,21 +1310,24 @@ mod tests {
 
         // The horizontal gradient should produce significant energy at position [0][1]
         // (first horizontal AC coefficient)
-        assert!(coeffs[1].abs() > 100, "Horizontal low frequency should be present");
+        assert!(
+            coeffs[1].abs() > 100,
+            "Horizontal low frequency should be present"
+        );
     }
 
     #[test]
     fn test_descale_rounding() {
         // Test that descale rounds correctly (rounds toward negative infinity)
-        assert_eq!(descale(7, 2), 2);   // (7+2) >> 2 = 9 >> 2 = 2
-        assert_eq!(descale(8, 2), 2);   // (8+2) >> 2 = 10 >> 2 = 2
-        assert_eq!(descale(9, 2), 2);   // (9+2) >> 2 = 11 >> 2 = 2
-        assert_eq!(descale(10, 2), 3);  // (10+2) >> 2 = 12 >> 2 = 3
+        assert_eq!(descale(7, 2), 2); // (7+2) >> 2 = 9 >> 2 = 2
+        assert_eq!(descale(8, 2), 2); // (8+2) >> 2 = 10 >> 2 = 2
+        assert_eq!(descale(9, 2), 2); // (9+2) >> 2 = 11 >> 2 = 2
+        assert_eq!(descale(10, 2), 3); // (10+2) >> 2 = 12 >> 2 = 3
 
         // Negative values (arithmetic right shift rounds toward -infinity)
-        assert_eq!(descale(-7, 2), -2);  // (-7+2) >> 2 = -5 >> 2 = -2
-        assert_eq!(descale(-8, 2), -2);  // (-8+2) >> 2 = -6 >> 2 = -2
-        assert_eq!(descale(-9, 2), -2);  // (-9+2) >> 2 = -7 >> 2 = -2
+        assert_eq!(descale(-7, 2), -2); // (-7+2) >> 2 = -5 >> 2 = -2
+        assert_eq!(descale(-8, 2), -2); // (-8+2) >> 2 = -6 >> 2 = -2
+        assert_eq!(descale(-9, 2), -2); // (-9+2) >> 2 = -7 >> 2 = -2
         assert_eq!(descale(-10, 2), -2); // (-10+2) >> 2 = -8 >> 2 = -2
     }
 
@@ -1092,7 +1341,10 @@ mod tests {
         forward_dct_8x8(&samples, &mut coeffs_scalar);
         forward_dct_8x8_simd(&samples, &mut coeffs_simd);
 
-        assert_eq!(coeffs_scalar, coeffs_simd, "SIMD should match scalar for flat block");
+        assert_eq!(
+            coeffs_scalar, coeffs_simd,
+            "SIMD should match scalar for flat block"
+        );
     }
 
     #[test]
@@ -1111,7 +1363,10 @@ mod tests {
         forward_dct_8x8(&samples, &mut coeffs_scalar);
         forward_dct_8x8_simd(&samples, &mut coeffs_simd);
 
-        assert_eq!(coeffs_scalar, coeffs_simd, "SIMD should match scalar for gradient block");
+        assert_eq!(
+            coeffs_scalar, coeffs_simd,
+            "SIMD should match scalar for gradient block"
+        );
     }
 
     #[test]
@@ -1129,7 +1384,10 @@ mod tests {
         forward_dct_8x8(&samples, &mut coeffs_scalar);
         forward_dct_8x8_simd(&samples, &mut coeffs_simd);
 
-        assert_eq!(coeffs_scalar, coeffs_simd, "SIMD should match scalar for random block");
+        assert_eq!(
+            coeffs_scalar, coeffs_simd,
+            "SIMD should match scalar for random block"
+        );
     }
 
     #[test]
@@ -1149,7 +1407,8 @@ mod tests {
 
             assert_eq!(
                 coeffs_scalar, coeffs_simd,
-                "SIMD should match scalar for pattern seed {}", seed
+                "SIMD should match scalar for pattern seed {}",
+                seed
             );
         }
     }
@@ -1164,7 +1423,10 @@ mod tests {
         forward_dct_8x8(&samples, &mut coeffs_scalar);
         forward_dct_8x8_transpose(&samples, &mut coeffs_transpose);
 
-        assert_eq!(coeffs_scalar, coeffs_transpose, "Transpose SIMD should match scalar for flat block");
+        assert_eq!(
+            coeffs_scalar, coeffs_transpose,
+            "Transpose SIMD should match scalar for flat block"
+        );
     }
 
     #[test]
@@ -1183,7 +1445,10 @@ mod tests {
         forward_dct_8x8(&samples, &mut coeffs_scalar);
         forward_dct_8x8_transpose(&samples, &mut coeffs_transpose);
 
-        assert_eq!(coeffs_scalar, coeffs_transpose, "Transpose SIMD should match scalar for gradient block");
+        assert_eq!(
+            coeffs_scalar, coeffs_transpose,
+            "Transpose SIMD should match scalar for gradient block"
+        );
     }
 
     #[test]
@@ -1201,7 +1466,10 @@ mod tests {
         forward_dct_8x8(&samples, &mut coeffs_scalar);
         forward_dct_8x8_transpose(&samples, &mut coeffs_transpose);
 
-        assert_eq!(coeffs_scalar, coeffs_transpose, "Transpose SIMD should match scalar for random block");
+        assert_eq!(
+            coeffs_scalar, coeffs_transpose,
+            "Transpose SIMD should match scalar for random block"
+        );
     }
 
     #[test]
@@ -1221,7 +1489,8 @@ mod tests {
 
             assert_eq!(
                 coeffs_scalar, coeffs_transpose,
-                "Transpose SIMD should match scalar for pattern seed {}", seed
+                "Transpose SIMD should match scalar for pattern seed {}",
+                seed
             );
         }
     }
@@ -1246,7 +1515,8 @@ mod tests {
 
             assert_eq!(
                 coeffs_scalar, coeffs_avx2,
-                "AVX2 SIMD should match scalar for pattern seed {}", seed
+                "AVX2 SIMD should match scalar for pattern seed {}",
+                seed
             );
         }
     }

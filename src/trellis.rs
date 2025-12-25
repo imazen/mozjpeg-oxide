@@ -163,8 +163,7 @@ pub fn trellis_quantize_block(
                 let rate = code_size as usize + candidate_bits as usize + zrl_cost;
 
                 // Cost = rate + distortion of this coef + distortion of zeros in run
-                let zero_run_dist =
-                    accumulated_zero_dist[i - 1] - accumulated_zero_dist[j];
+                let zero_run_dist = accumulated_zero_dist[i - 1] - accumulated_zero_dist[j];
                 let prev_cost = if j == 0 { 0.0 } else { accumulated_cost[j] };
                 let cost = rate as f32 + candidate_dist + zero_run_dist + prev_cost;
 
@@ -190,8 +189,7 @@ pub fn trellis_quantize_block(
         let z = JPEG_NATURAL_ORDER[i];
         if quantized[z] != 0 {
             // Cost if this is the last non-zero coefficient
-            let tail_zero_dist =
-                accumulated_zero_dist[DCTSIZE2 - 1] - accumulated_zero_dist[i];
+            let tail_zero_dist = accumulated_zero_dist[DCTSIZE2 - 1] - accumulated_zero_dist[i];
             let mut cost = accumulated_cost[i] + tail_zero_dist;
             if i < DCTSIZE2 - 1 {
                 cost += eob_cost;
@@ -355,7 +353,11 @@ pub fn trellis_quantize_block_with_eob_info(
                 let rate = code_size as usize + candidate_bits as usize + zrl_cost;
 
                 let zero_run_dist = accumulated_zero_dist[i - 1] - accumulated_zero_dist[j];
-                let prev_cost = if j == ss - 1 { 0.0 } else { accumulated_cost[j] };
+                let prev_cost = if j == ss - 1 {
+                    0.0
+                } else {
+                    accumulated_cost[j]
+                };
                 let cost = rate as f32 + candidate_dist + zero_run_dist + prev_cost;
 
                 if cost < accumulated_cost[i] {
@@ -600,7 +602,8 @@ pub fn dc_trellis_optimize_indexed(
     // Find the best final candidate
     let mut best_final = 0;
     for k in 1..num_candidates {
-        if accumulated_dc_cost[k][num_blocks - 1] < accumulated_dc_cost[best_final][num_blocks - 1] {
+        if accumulated_dc_cost[k][num_blocks - 1] < accumulated_dc_cost[best_final][num_blocks - 1]
+        {
             best_final = k;
         }
     }
@@ -734,7 +737,12 @@ pub fn optimize_eob_runs(
         let mut cost = accumulated_zero_block_cost[num_blocks] - accumulated_zero_block_cost[i];
 
         // Add EOBRUN cost for trailing zero blocks
-        let zero_block_run = num_blocks - i + if i > 0 { block_info[i - 1].requires_eob as usize } else { 0 };
+        let zero_block_run = num_blocks - i
+            + if i > 0 {
+                block_info[i - 1].requires_eob as usize
+            } else {
+                0
+            };
         if zero_block_run > 0 && i < num_blocks {
             let nbits = jpeg_nbits(zero_block_run as i16) as usize;
             let (_, eobrun_size) = ac_table.get_code((16 * nbits) as u8);
@@ -872,7 +880,7 @@ mod tests {
         // Create a test block with known values (raw DCT, scaled by 8)
         let mut src = [0i32; DCTSIZE2];
         src[0] = 1000 * 8; // DC
-        src[1] = 100 * 8;  // AC
+        src[1] = 100 * 8; // AC
 
         let mut quantized = [0i16; DCTSIZE2];
         simple_quantize_block(&src, &mut quantized, &qtable);

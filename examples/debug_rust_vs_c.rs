@@ -43,7 +43,7 @@ fn main() {
         .subsampling(Subsampling::S420)
         .progressive(false)
         .trellis(TrellisConfig::disabled())
-        .optimize_huffman(false)  // Use standard tables for comparison
+        .optimize_huffman(false) // Use standard tables for comparison
         .encode_rgb(&rgb_data, width, height)
         .expect("Rust encode failed");
 
@@ -137,7 +137,10 @@ fn main() {
         println!("Differing components: {}", diff_pixels);
         println!("Max component diff: {}", max_diff);
         if diff_pixels > 0 {
-            println!("Avg diff (of differing): {:.2}", sum_diff as f64 / diff_pixels as f64);
+            println!(
+                "Avg diff (of differing): {:.2}",
+                sum_diff as f64 / diff_pixels as f64
+            );
         }
     }
 }
@@ -263,5 +266,8 @@ fn identify_jpeg_section(data: &[u8], pos: usize) {
         i += 1;
     }
 
-    println!("Position {:#x} is in/after {} marker (at {:#x})", pos, last_marker, last_marker_pos);
+    println!(
+        "Position {:#x} is in/after {} marker (at {:#x})",
+        pos, last_marker, last_marker_pos
+    );
 }

@@ -220,7 +220,11 @@ fn bench_image_sizes(c: &mut Criterion) {
             &rgb,
             |b, rgb_data| {
                 let encoder = Encoder::fastest().quality(85);
-                b.iter(|| encoder.encode_rgb(black_box(rgb_data), width, height).unwrap())
+                b.iter(|| {
+                    encoder
+                        .encode_rgb(black_box(rgb_data), width, height)
+                        .unwrap()
+                })
             },
         );
 
@@ -230,7 +234,11 @@ fn bench_image_sizes(c: &mut Criterion) {
             &rgb,
             |b, rgb_data| {
                 let encoder = Encoder::new().quality(85);
-                b.iter(|| encoder.encode_rgb(black_box(rgb_data), width, height).unwrap())
+                b.iter(|| {
+                    encoder
+                        .encode_rgb(black_box(rgb_data), width, height)
+                        .unwrap()
+                })
             },
         );
 
@@ -240,7 +248,11 @@ fn bench_image_sizes(c: &mut Criterion) {
             &rgb,
             |b, rgb_data| {
                 let encoder = Encoder::max_compression().quality(85);
-                b.iter(|| encoder.encode_rgb(black_box(rgb_data), width, height).unwrap())
+                b.iter(|| {
+                    encoder
+                        .encode_rgb(black_box(rgb_data), width, height)
+                        .unwrap()
+                })
             },
         );
     }

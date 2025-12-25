@@ -53,7 +53,7 @@ fn test_edge_padding_behavior() {
     }
 
     // Method 1: Our approach - downsample then pad
-    let ds_w = (width + 1) / 2;  // 25
+    let ds_w = (width + 1) / 2; // 25
     let ds_h = (height + 1) / 2; // 26
     let mut our_ds = vec![0u8; ds_w * ds_h];
     our_downsample_h2v2(&image, width, height, &mut our_ds, ds_w, ds_h);

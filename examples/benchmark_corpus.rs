@@ -27,8 +27,10 @@ fn main() {
     let mut c_psnr_sum = 0.0f64;
 
     println!("Benchmarking Rust vs C mozjpeg at Q75\n");
-    println!("{:<50} {:>12} {:>12} {:>8} {:>10} {:>10}",
-             "Image", "Rust", "C mozjpeg", "Ratio", "Rust PSNR", "C PSNR");
+    println!(
+        "{:<50} {:>12} {:>12} {:>8} {:>10} {:>10}",
+        "Image", "Rust", "C mozjpeg", "Ratio", "Rust PSNR", "C PSNR"
+    );
     println!("{}", "-".repeat(102));
 
     for corpus_dir in &corpus_dirs {
@@ -99,7 +101,10 @@ fn main() {
             avg_c_psnr
         );
         println!("\nAverage file size ratio: {:.3}x", avg_ratio);
-        println!("Average PSNR: Rust={:.2} dB, C={:.2} dB", avg_rust_psnr, avg_c_psnr);
+        println!(
+            "Average PSNR: Rust={:.2} dB, C={:.2} dB",
+            avg_rust_psnr, avg_c_psnr
+        );
     }
 }
 

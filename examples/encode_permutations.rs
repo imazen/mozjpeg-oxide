@@ -33,12 +33,10 @@ fn main() {
     // Convert to RGB if necessary
     let rgb_data: Vec<u8> = match info.color_type {
         ColorType::Rgb => buf[..info.buffer_size()].to_vec(),
-        ColorType::Rgba => {
-            buf[..info.buffer_size()]
-                .chunks(4)
-                .flat_map(|c| [c[0], c[1], c[2]])
-                .collect()
-        }
+        ColorType::Rgba => buf[..info.buffer_size()]
+            .chunks(4)
+            .flat_map(|c| [c[0], c[1], c[2]])
+            .collect(),
         _ => panic!("Unsupported color type: {:?}", info.color_type),
     };
 
@@ -162,6 +160,8 @@ fn main() {
     println!(
         "\n{} files written to {:?}",
         results.len(),
-        output_dir.canonicalize().unwrap_or(output_dir.to_path_buf())
+        output_dir
+            .canonicalize()
+            .unwrap_or(output_dir.to_path_buf())
     );
 }

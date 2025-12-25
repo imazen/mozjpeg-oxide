@@ -31,14 +31,14 @@ const fn fix(x: f64) -> i32 {
 }
 
 // Pre-computed fixed-point conversion constants
-const FIX_0_29900: i32 = fix(0.29900);  // Y coefficient for R
-const FIX_0_58700: i32 = fix(0.58700);  // Y coefficient for G
-const FIX_0_11400: i32 = fix(0.11400);  // Y coefficient for B
-const FIX_0_16874: i32 = fix(0.16874);  // Cb coefficient for R (negated)
-const FIX_0_33126: i32 = fix(0.33126);  // Cb coefficient for G (negated)
-const FIX_0_50000: i32 = fix(0.50000);  // Cb coefficient for B, Cr coefficient for R
-const FIX_0_41869: i32 = fix(0.41869);  // Cr coefficient for G (negated)
-const FIX_0_08131: i32 = fix(0.08131);  // Cr coefficient for B (negated)
+const FIX_0_29900: i32 = fix(0.29900); // Y coefficient for R
+const FIX_0_58700: i32 = fix(0.58700); // Y coefficient for G
+const FIX_0_11400: i32 = fix(0.11400); // Y coefficient for B
+const FIX_0_16874: i32 = fix(0.16874); // Cb coefficient for R (negated)
+const FIX_0_33126: i32 = fix(0.33126); // Cb coefficient for G (negated)
+const FIX_0_50000: i32 = fix(0.50000); // Cb coefficient for B, Cr coefficient for R
+const FIX_0_41869: i32 = fix(0.41869); // Cr coefficient for G (negated)
+const FIX_0_08131: i32 = fix(0.08131); // Cr coefficient for B (negated)
 
 /// Convert a single RGB pixel to YCbCr.
 ///
@@ -184,11 +184,13 @@ pub fn convert_rgb_to_ycbcr(
         let y = y.max(zero_8).min(max_val_8);
 
         // Cb = -0.16874 * R - 0.33126 * G + 0.50000 * B + 128
-        let cb = ((fix_cb_r_8 * r + fix_cb_g_8 * g + fix_cb_b_8 * b + half_8) >> SCALEBITS) + center_8;
+        let cb =
+            ((fix_cb_r_8 * r + fix_cb_g_8 * g + fix_cb_b_8 * b + half_8) >> SCALEBITS) + center_8;
         let cb = cb.max(zero_8).min(max_val_8);
 
         // Cr = 0.50000 * R - 0.41869 * G - 0.08131 * B + 128
-        let cr = ((fix_cr_r_8 * r + fix_cr_g_8 * g + fix_cr_b_8 * b + half_8) >> SCALEBITS) + center_8;
+        let cr =
+            ((fix_cr_r_8 * r + fix_cr_g_8 * g + fix_cr_b_8 * b + half_8) >> SCALEBITS) + center_8;
         let cr = cr.max(zero_8).min(max_val_8);
 
         // Store results
@@ -469,7 +471,7 @@ mod tests {
         let mut rgb_block = [0u8; 192];
         // Fill with a gradient
         for i in 0..64 {
-            rgb_block[i * 3] = (i * 4) as u8;     // R
+            rgb_block[i * 3] = (i * 4) as u8; // R
             rgb_block[i * 3 + 1] = (i * 2) as u8; // G
             rgb_block[i * 3 + 2] = (i * 3) as u8; // B
         }
@@ -486,8 +488,7 @@ mod tests {
         assert_eq!(cb_block[0], cb0);
         assert_eq!(cr_block[0], cr0);
 
-        let (y63, cb63, cr63) =
-            rgb_to_ycbcr(rgb_block[189], rgb_block[190], rgb_block[191]);
+        let (y63, cb63, cr63) = rgb_to_ycbcr(rgb_block[189], rgb_block[190], rgb_block[191]);
         assert_eq!(y_block[63], y63);
         assert_eq!(cb_block[63], cb63);
         assert_eq!(cr_block[63], cr63);

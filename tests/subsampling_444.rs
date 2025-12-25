@@ -68,7 +68,10 @@ fn test_444_subsampling_corpus() {
 
     if total_images > 0 {
         let avg_ratio = total_rust_bytes as f64 / total_c_bytes as f64;
-        println!("\nAverage ratio: {:.4}x ({} images)", avg_ratio, total_images);
+        println!(
+            "\nAverage ratio: {:.4}x ({} images)",
+            avg_ratio, total_images
+        );
 
         // Overall ratio should be close to 1.0
         assert!(
@@ -155,10 +158,7 @@ fn load_png(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 
     let rgb_data = match info.color_type {
         png::ColorType::Rgb => bytes.to_vec(),
-        png::ColorType::Rgba => bytes
-            .chunks(4)
-            .flat_map(|c| [c[0], c[1], c[2]])
-            .collect(),
+        png::ColorType::Rgba => bytes.chunks(4).flat_map(|c| [c[0], c[1], c[2]]).collect(),
         _ => return None,
     };
 

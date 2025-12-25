@@ -52,12 +52,7 @@ fn test_encoder_produces_valid_output() {
         assert_eq!(info.height as u32, height, "{}: height mismatch", name);
 
         // Verify decoded size matches original (width * height * 3 for RGB)
-        assert_eq!(
-            decoded.len(),
-            w * h * 3,
-            "{}: decoded size mismatch",
-            name
-        );
+        assert_eq!(decoded.len(), w * h * 3, "{}: decoded size mismatch", name);
 
         // Calculate PSNR to verify quality is reasonable
         let psnr = calculate_psnr(&rgb, &decoded);
@@ -113,11 +108,7 @@ fn test_progressive_encoder_valid() {
     // DSSIM perceptual quality check - lenient threshold for synthetic patterns
     // (modular pattern is difficult for JPEG to compress well)
     let dssim = calculate_dssim(&rgb, &decoded, width, height);
-    assert!(
-        dssim < 0.01,
-        "Progressive DSSIM too high: {:.6}",
-        dssim
-    );
+    assert!(dssim < 0.01, "Progressive DSSIM too high: {:.6}", dssim);
 }
 
 fn calculate_psnr(original: &[u8], decoded: &[u8]) -> f64 {

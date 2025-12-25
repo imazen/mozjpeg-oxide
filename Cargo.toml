@@ -2,6 +2,7 @@
 name = "mozjpeg-oxide"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.70.0"
 license = "BSD-3-Clause"
 repository = "https://github.com/imazen/mozjpeg-oxide"
 description = "Pure Rust JPEG encoder based on Mozilla's mozjpeg with trellis quantization"
@@ -10,6 +11,15 @@ documentation = "https://docs.rs/mozjpeg-oxide"
 readme = "README.md"
 keywords = ["jpeg", "encoder", "mozjpeg", "compression", "image"]
 categories = ["encoding", "multimedia::images"]
+exclude = [
+    "benchmark/",
+    "corpus/",
+    "crates/",
+    "scripts/",
+    "comparison_outputs/",
+    ".github/",
+    "tests/images/*.png",
+]
 
 [workspace]
 members = ["crates/*"]

@@ -47,7 +47,11 @@ impl fmt::Display for Error {
                 write!(f, "Invalid image dimensions: {}x{}", width, height)
             }
             Error::BufferSizeMismatch { expected, actual } => {
-                write!(f, "Buffer size mismatch: expected {}, got {}", expected, actual)
+                write!(
+                    f,
+                    "Buffer size mismatch: expected {}, got {}",
+                    expected, actual
+                )
             }
             Error::InvalidQuality(q) => {
                 write!(f, "Invalid quality value: {} (must be 1-100)", q)

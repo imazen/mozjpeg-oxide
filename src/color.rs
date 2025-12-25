@@ -14,7 +14,7 @@
 //! SIMD-optimized versions are available using the `wide` crate for
 //! processing multiple pixels in parallel.
 
-use wide::i32x4;
+use wide::i32x8;
 
 /// Fixed-point precision bits (16 bits gives ~4 decimal digits precision)
 const SCALEBITS: i32 = 16;
@@ -125,57 +125,71 @@ pub fn convert_rgb_to_ycbcr(
 
     let num_pixels = width * height;
 
-    // SIMD constants
-    let fix_y_r = i32x4::splat(FIX_0_29900);
-    let fix_y_g = i32x4::splat(FIX_0_58700);
-    let fix_y_b = i32x4::splat(FIX_0_11400);
-    let fix_cb_r = i32x4::splat(-FIX_0_16874);
-    let fix_cb_g = i32x4::splat(-FIX_0_33126);
-    let fix_cb_b = i32x4::splat(FIX_0_50000);
-    let fix_cr_r = i32x4::splat(FIX_0_50000);
-    let fix_cr_g = i32x4::splat(-FIX_0_41869);
-    let fix_cr_b = i32x4::splat(-FIX_0_08131);
-    let half = i32x4::splat(ONE_HALF);
-    let center = i32x4::splat(CBCR_CENTER);
-    let zero = i32x4::splat(0);
-    let max_val = i32x4::splat(255);
+    // AVX2 path: Process 8 pixels at a time using i32x8
+    // This uses native AVX2 instructions when available via the `wide` crate
+    let fix_y_r_8 = i32x8::splat(FIX_0_29900);
+    let fix_y_g_8 = i32x8::splat(FIX_0_58700);
+    let fix_y_b_8 = i32x8::splat(FIX_0_11400);
+    let fix_cb_r_8 = i32x8::splat(-FIX_0_16874);
+    let fix_cb_g_8 = i32x8::splat(-FIX_0_33126);
+    let fix_cb_b_8 = i32x8::splat(FIX_0_50000);
+    let fix_cr_r_8 = i32x8::splat(FIX_0_50000);
+    let fix_cr_g_8 = i32x8::splat(-FIX_0_41869);
+    let fix_cr_b_8 = i32x8::splat(-FIX_0_08131);
+    let half_8 = i32x8::splat(ONE_HALF);
+    let center_8 = i32x8::splat(CBCR_CENTER);
+    let zero_8 = i32x8::splat(0);
+    let max_val_8 = i32x8::splat(255);
 
-    // Process 4 pixels at a time
-    let chunks = num_pixels / 4;
-    for chunk in 0..chunks {
-        let base = chunk * 4;
+    // Process 8 pixels at a time
+    let chunks_8 = num_pixels / 8;
+    for chunk in 0..chunks_8 {
+        let base = chunk * 8;
+        let rgb_base = base * 3;
 
-        // Gather RGB values (interleaved to planar)
-        let r = i32x4::new([
-            rgb[base * 3] as i32,
-            rgb[base * 3 + 3] as i32,
-            rgb[base * 3 + 6] as i32,
-            rgb[base * 3 + 9] as i32,
+        // Gather RGB values from interleaved format (8 pixels = 24 bytes)
+        let r = i32x8::new([
+            rgb[rgb_base] as i32,
+            rgb[rgb_base + 3] as i32,
+            rgb[rgb_base + 6] as i32,
+            rgb[rgb_base + 9] as i32,
+            rgb[rgb_base + 12] as i32,
+            rgb[rgb_base + 15] as i32,
+            rgb[rgb_base + 18] as i32,
+            rgb[rgb_base + 21] as i32,
         ]);
-        let g = i32x4::new([
-            rgb[base * 3 + 1] as i32,
-            rgb[base * 3 + 4] as i32,
-            rgb[base * 3 + 7] as i32,
-            rgb[base * 3 + 10] as i32,
+        let g = i32x8::new([
+            rgb[rgb_base + 1] as i32,
+            rgb[rgb_base + 4] as i32,
+            rgb[rgb_base + 7] as i32,
+            rgb[rgb_base + 10] as i32,
+            rgb[rgb_base + 13] as i32,
+            rgb[rgb_base + 16] as i32,
+            rgb[rgb_base + 19] as i32,
+            rgb[rgb_base + 22] as i32,
         ]);
-        let b = i32x4::new([
-            rgb[base * 3 + 2] as i32,
-            rgb[base * 3 + 5] as i32,
-            rgb[base * 3 + 8] as i32,
-            rgb[base * 3 + 11] as i32,
+        let b = i32x8::new([
+            rgb[rgb_base + 2] as i32,
+            rgb[rgb_base + 5] as i32,
+            rgb[rgb_base + 8] as i32,
+            rgb[rgb_base + 11] as i32,
+            rgb[rgb_base + 14] as i32,
+            rgb[rgb_base + 17] as i32,
+            rgb[rgb_base + 20] as i32,
+            rgb[rgb_base + 23] as i32,
         ]);
 
         // Y = 0.29900 * R + 0.58700 * G + 0.11400 * B
-        let y = (fix_y_r * r + fix_y_g * g + fix_y_b * b + half) >> SCALEBITS;
-        let y = y.max(zero).min(max_val);
+        let y = (fix_y_r_8 * r + fix_y_g_8 * g + fix_y_b_8 * b + half_8) >> SCALEBITS;
+        let y = y.max(zero_8).min(max_val_8);
 
         // Cb = -0.16874 * R - 0.33126 * G + 0.50000 * B + 128
-        let cb = ((fix_cb_r * r + fix_cb_g * g + fix_cb_b * b + half) >> SCALEBITS) + center;
-        let cb = cb.max(zero).min(max_val);
+        let cb = ((fix_cb_r_8 * r + fix_cb_g_8 * g + fix_cb_b_8 * b + half_8) >> SCALEBITS) + center_8;
+        let cb = cb.max(zero_8).min(max_val_8);
 
         // Cr = 0.50000 * R - 0.41869 * G - 0.08131 * B + 128
-        let cr = ((fix_cr_r * r + fix_cr_g * g + fix_cr_b * b + half) >> SCALEBITS) + center;
-        let cr = cr.max(zero).min(max_val);
+        let cr = ((fix_cr_r_8 * r + fix_cr_g_8 * g + fix_cr_b_8 * b + half_8) >> SCALEBITS) + center_8;
+        let cr = cr.max(zero_8).min(max_val_8);
 
         // Store results
         let y_arr = y.to_array();
@@ -185,18 +199,30 @@ pub fn convert_rgb_to_ycbcr(
         y_out[base + 1] = y_arr[1] as u8;
         y_out[base + 2] = y_arr[2] as u8;
         y_out[base + 3] = y_arr[3] as u8;
+        y_out[base + 4] = y_arr[4] as u8;
+        y_out[base + 5] = y_arr[5] as u8;
+        y_out[base + 6] = y_arr[6] as u8;
+        y_out[base + 7] = y_arr[7] as u8;
         cb_out[base] = cb_arr[0] as u8;
         cb_out[base + 1] = cb_arr[1] as u8;
         cb_out[base + 2] = cb_arr[2] as u8;
         cb_out[base + 3] = cb_arr[3] as u8;
+        cb_out[base + 4] = cb_arr[4] as u8;
+        cb_out[base + 5] = cb_arr[5] as u8;
+        cb_out[base + 6] = cb_arr[6] as u8;
+        cb_out[base + 7] = cb_arr[7] as u8;
         cr_out[base] = cr_arr[0] as u8;
         cr_out[base + 1] = cr_arr[1] as u8;
         cr_out[base + 2] = cr_arr[2] as u8;
         cr_out[base + 3] = cr_arr[3] as u8;
+        cr_out[base + 4] = cr_arr[4] as u8;
+        cr_out[base + 5] = cr_arr[5] as u8;
+        cr_out[base + 6] = cr_arr[6] as u8;
+        cr_out[base + 7] = cr_arr[7] as u8;
     }
 
     // Handle remaining pixels with scalar code
-    for i in (chunks * 4)..num_pixels {
+    for i in (chunks_8 * 8)..num_pixels {
         let r = rgb[i * 3];
         let g = rgb[i * 3 + 1];
         let b = rgb[i * 3 + 2];
@@ -209,8 +235,8 @@ pub fn convert_rgb_to_ycbcr(
 
 /// Convert an RGB image buffer to grayscale.
 ///
-/// This function uses SIMD to process 4 pixels at a time for better
-/// performance.
+/// This function uses SIMD to process 8 pixels at a time for better
+/// performance using AVX2 when available.
 ///
 /// # Arguments
 /// * `rgb` - Input RGB data (3 bytes per pixel: R, G, B)
@@ -223,35 +249,48 @@ pub fn convert_rgb_to_gray(rgb: &[u8], gray_out: &mut [u8], width: usize, height
 
     let num_pixels = width * height;
 
-    // SIMD constants for Y calculation
-    let fix_y_r = i32x4::splat(FIX_0_29900);
-    let fix_y_g = i32x4::splat(FIX_0_58700);
-    let fix_y_b = i32x4::splat(FIX_0_11400);
-    let half = i32x4::splat(ONE_HALF);
+    // AVX2 SIMD constants for Y calculation (8 pixels at a time)
+    let fix_y_r = i32x8::splat(FIX_0_29900);
+    let fix_y_g = i32x8::splat(FIX_0_58700);
+    let fix_y_b = i32x8::splat(FIX_0_11400);
+    let half = i32x8::splat(ONE_HALF);
 
-    // Process 4 pixels at a time
-    let chunks = num_pixels / 4;
+    // Process 8 pixels at a time
+    let chunks = num_pixels / 8;
     for chunk in 0..chunks {
-        let base = chunk * 4;
+        let base = chunk * 8;
+        let rgb_base = base * 3;
 
-        // Gather RGB values
-        let r = i32x4::new([
-            rgb[base * 3] as i32,
-            rgb[base * 3 + 3] as i32,
-            rgb[base * 3 + 6] as i32,
-            rgb[base * 3 + 9] as i32,
+        // Gather RGB values from interleaved format
+        let r = i32x8::new([
+            rgb[rgb_base] as i32,
+            rgb[rgb_base + 3] as i32,
+            rgb[rgb_base + 6] as i32,
+            rgb[rgb_base + 9] as i32,
+            rgb[rgb_base + 12] as i32,
+            rgb[rgb_base + 15] as i32,
+            rgb[rgb_base + 18] as i32,
+            rgb[rgb_base + 21] as i32,
         ]);
-        let g = i32x4::new([
-            rgb[base * 3 + 1] as i32,
-            rgb[base * 3 + 4] as i32,
-            rgb[base * 3 + 7] as i32,
-            rgb[base * 3 + 10] as i32,
+        let g = i32x8::new([
+            rgb[rgb_base + 1] as i32,
+            rgb[rgb_base + 4] as i32,
+            rgb[rgb_base + 7] as i32,
+            rgb[rgb_base + 10] as i32,
+            rgb[rgb_base + 13] as i32,
+            rgb[rgb_base + 16] as i32,
+            rgb[rgb_base + 19] as i32,
+            rgb[rgb_base + 22] as i32,
         ]);
-        let b = i32x4::new([
-            rgb[base * 3 + 2] as i32,
-            rgb[base * 3 + 5] as i32,
-            rgb[base * 3 + 8] as i32,
-            rgb[base * 3 + 11] as i32,
+        let b = i32x8::new([
+            rgb[rgb_base + 2] as i32,
+            rgb[rgb_base + 5] as i32,
+            rgb[rgb_base + 8] as i32,
+            rgb[rgb_base + 11] as i32,
+            rgb[rgb_base + 14] as i32,
+            rgb[rgb_base + 17] as i32,
+            rgb[rgb_base + 20] as i32,
+            rgb[rgb_base + 23] as i32,
         ]);
 
         // Y = 0.29900 * R + 0.58700 * G + 0.11400 * B
@@ -262,10 +301,14 @@ pub fn convert_rgb_to_gray(rgb: &[u8], gray_out: &mut [u8], width: usize, height
         gray_out[base + 1] = y_arr[1] as u8;
         gray_out[base + 2] = y_arr[2] as u8;
         gray_out[base + 3] = y_arr[3] as u8;
+        gray_out[base + 4] = y_arr[4] as u8;
+        gray_out[base + 5] = y_arr[5] as u8;
+        gray_out[base + 6] = y_arr[6] as u8;
+        gray_out[base + 7] = y_arr[7] as u8;
     }
 
     // Handle remaining pixels
-    for i in (chunks * 4)..num_pixels {
+    for i in (chunks * 8)..num_pixels {
         let r = rgb[i * 3];
         let g = rgb[i * 3 + 1];
         let b = rgb[i * 3 + 2];

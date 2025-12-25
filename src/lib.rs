@@ -78,6 +78,10 @@
 //!
 //! Most users should use the [`Encoder`] API instead.
 
+// Enforce no unsafe code in this crate, except where explicitly allowed.
+// SIMD intrinsics in dct.rs and test FFI code are the only exceptions.
+#![deny(unsafe_code)]
+
 // Public modules - available for advanced use cases
 pub mod bitstream;
 pub mod color;

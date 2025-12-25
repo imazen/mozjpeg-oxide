@@ -146,6 +146,7 @@ pub fn encode_rust(rgb: &[u8], width: u32, height: u32, config: &TestEncoderConf
 /// Only available in unit tests (uses mozjpeg-sys dev-dependency).
 /// For integration tests, use the encode_c_impl function template below.
 #[cfg(test)]
+#[allow(unsafe_code)] // FFI calls to C mozjpeg
 pub fn encode_c(rgb: &[u8], width: u32, height: u32, config: &TestEncoderConfig) -> Vec<u8> {
     use mozjpeg_sys::*;
     use std::ptr;

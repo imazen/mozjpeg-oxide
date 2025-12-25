@@ -867,6 +867,7 @@ pub fn level_shift(samples: &[u8; DCTSIZE2], output: &mut [i16; DCTSIZE2]) {
 /// # Arguments
 /// * `samples` - Input 8x8 block of pixel samples (0-255)
 /// * `coeffs` - Output 8x8 block of DCT coefficients
+#[allow(unsafe_code)] // Calls AVX2 intrinsics when available
 pub fn forward_dct(samples: &[u8; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
     let mut shifted = [0i16; DCTSIZE2];
     level_shift(samples, &mut shifted);
@@ -874,6 +875,7 @@ pub fn forward_dct(samples: &[u8; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
     #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
     {
         // Use AVX2 intrinsics for best performance
+        // SAFETY: We've verified target_feature = "avx2" at compile time
         unsafe { avx2::forward_dct_8x8_avx2(&shifted, coeffs) };
     }
 
@@ -898,6 +900,7 @@ pub fn forward_dct(samples: &[u8; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
 ///
 /// # See Also
 /// [`crate::deringing::preprocess_deringing`] for algorithm details.
+#[allow(unsafe_code)] // Calls AVX2 intrinsics when available
 pub fn forward_dct_with_deringing(
     samples: &[u8; DCTSIZE2],
     coeffs: &mut [i16; DCTSIZE2],
@@ -912,6 +915,7 @@ pub fn forward_dct_with_deringing(
     #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
     {
         // Use AVX2 intrinsics for best performance
+        // SAFETY: We've verified target_feature = "avx2" at compile time
         unsafe { avx2::forward_dct_8x8_avx2(&shifted, coeffs) };
     }
 
@@ -933,6 +937,11 @@ pub fn forward_dct_with_deringing(
 
 #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
 pub mod avx2 {
+    //! AVX2 SIMD implementation of forward DCT.
+    //!
+    //! This module uses unsafe SIMD intrinsics for performance.
+    #![allow(unsafe_code)]
+
     use super::*;
     use core::arch::x86_64::*;
 

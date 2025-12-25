@@ -1,0 +1,11 @@
+# Cargo aliases for common development tasks
+
+[alias]
+# Run corpus benchmark (requires corpus images in ./corpus or CODEC_CORPUS_DIR)
+bench-corpus = "run --release --example pareto_benchmark --"
+
+# Quick benchmark on Kodak images only
+bench-kodak = "run --release --example pareto_benchmark -- --kodak-only"
+
+# Run microbenchmarks (criterion)
+bench-micro = "bench --bench encode"

@@ -666,6 +666,7 @@ pub fn level_shift(samples: &[u8; DCTSIZE2], output: &mut [i16; DCTSIZE2]) {
 ///
 /// Uses SIMD-optimized DCT for better performance.
 /// Uses transpose-based approach for contiguous memory access.
+/// Uses AVX2 intrinsics when available for best performance.
 ///
 /// # Arguments
 /// * `samples` - Input 8x8 block of pixel samples (0-255)
@@ -673,13 +674,24 @@ pub fn level_shift(samples: &[u8; DCTSIZE2], output: &mut [i16; DCTSIZE2]) {
 pub fn forward_dct(samples: &[u8; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
     let mut shifted = [0i16; DCTSIZE2];
     level_shift(samples, &mut shifted);
-    forward_dct_8x8_transpose(&shifted, coeffs);
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    {
+        // Use AVX2 intrinsics for best performance
+        unsafe { avx2::forward_dct_8x8_avx2(&shifted, coeffs) };
+    }
+
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx2")))]
+    {
+        forward_dct_8x8_transpose(&shifted, coeffs);
+    }
 }
 
 /// Combined level-shift, overshoot deringing, and forward DCT.
 ///
 /// Uses SIMD-optimized DCT for better performance.
 /// Uses transpose-based approach for contiguous memory access.
+/// Uses AVX2 intrinsics when available for best performance.
 /// This variant applies mozjpeg's overshoot deringing preprocessing to reduce
 /// visible ringing artifacts near hard edges on white backgrounds.
 ///
@@ -700,7 +712,17 @@ pub fn forward_dct_with_deringing(
     let mut shifted = [0i16; DCTSIZE2];
     level_shift(samples, &mut shifted);
     preprocess_deringing(&mut shifted, dc_quant);
-    forward_dct_8x8_transpose(&shifted, coeffs);
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    {
+        // Use AVX2 intrinsics for best performance
+        unsafe { avx2::forward_dct_8x8_avx2(&shifted, coeffs) };
+    }
+
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx2")))]
+    {
+        forward_dct_8x8_transpose(&shifted, coeffs);
+    }
 }
 
 // ============================================================================

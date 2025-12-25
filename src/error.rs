@@ -7,6 +7,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error type for mozjpeg operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
     /// Invalid image dimensions (zero width or height)
     InvalidDimensions { width: u32, height: u32 },

@@ -52,7 +52,7 @@ codec-eval = { git = "https://github.com/imazen/codec-eval" }
 # Local mozjpeg-sys with granular test exports (for FFI comparison tests)
 sys-local = { path = "crates/sys-local" }
 # Butteraugli perceptual image quality metric
-butteraugli-oxide = "0.1"
+butteraugli-oxide = "0.2"
 
 [[bench]]
 name = "encode"

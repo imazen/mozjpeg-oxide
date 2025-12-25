@@ -156,11 +156,12 @@ fn main() {
             let width = image.width() as u32;
             let height = image.height() as u32;
             let quality = request.quality as u8;
-            encode_rust(&rgb, width, height, quality)
-                .map_err(|e: mozjpeg_oxide::Error| codec_eval::Error::Codec {
+            encode_rust(&rgb, width, height, quality).map_err(|e: mozjpeg_oxide::Error| {
+                codec_eval::Error::Codec {
                     codec: "rust".to_string(),
                     message: e.to_string(),
-                })
+                }
+            })
         }),
         Box::new(|data| {
             let decoded = decode_jpeg(data);
@@ -310,7 +311,12 @@ fn load_png(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     Some((rgb, info.width, info.height))
 }
 
-fn encode_rust(rgb: &[u8], width: u32, height: u32, quality: u8) -> Result<Vec<u8>, mozjpeg_oxide::Error> {
+fn encode_rust(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+) -> Result<Vec<u8>, mozjpeg_oxide::Error> {
     use mozjpeg_oxide::TrellisConfig;
 
     // Use settings that match C mozjpeg configuration:

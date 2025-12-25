@@ -158,7 +158,7 @@ pub fn encode_c(rgb: &[u8], width: u32, height: u32, config: &TestEncoderConfig)
         cinfo.common.err = jpeg_std_error(&mut jerr);
         jpeg_CreateCompress(
             &mut cinfo,
-            JPEG_LIB_VERSION as i32,
+            JPEG_LIB_VERSION,
             std::mem::size_of::<jpeg_compress_struct>(),
         );
 

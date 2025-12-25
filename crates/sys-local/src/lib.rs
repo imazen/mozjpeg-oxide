@@ -5,6 +5,7 @@
 
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
 
 use libc::{c_int, c_uchar, c_uint, c_void, size_t};
 
@@ -214,7 +215,10 @@ extern "C" {
 // Version constant for jpeg_CreateCompress
 pub const JPEG_LIB_VERSION: c_int = 62;
 
-/// Helper to create compress struct
+/// Helper to create compress struct.
+///
+/// # Safety
+/// `cinfo` must point to a valid, uninitialized `jpeg_compress_struct`.
 pub unsafe fn jpeg_create_compress(cinfo: *mut jpeg_compress_struct) {
     jpeg_CreateCompress(
         cinfo,
@@ -300,7 +304,7 @@ mod tests {
             }
             // Just verify the C function works - actual comparison with Rust will be in the main crate
             assert!(
-                c_y >= 0 && c_y <= 255,
+                (0..=255).contains(&c_y),
                 "Y out of range for ({},{},{}): {}",
                 r,
                 g,
@@ -308,7 +312,7 @@ mod tests {
                 c_y
             );
             assert!(
-                c_cb >= 0 && c_cb <= 255,
+                (0..=255).contains(&c_cb),
                 "Cb out of range for ({},{},{}): {}",
                 r,
                 g,
@@ -316,7 +320,7 @@ mod tests {
                 c_cb
             );
             assert!(
-                c_cr >= 0 && c_cr <= 255,
+                (0..=255).contains(&c_cr),
                 "Cr out of range for ({},{},{}): {}",
                 r,
                 g,
@@ -368,9 +372,9 @@ mod tests {
         // DC coefficient should be non-zero, AC should all be zero
         assert_ne!(data2[0], 0, "DC coefficient should be non-zero");
         // AC coefficients (positions 1-63) should all be zero for uniform input
-        for i in 1..64 {
+        for (i, &coeff) in data2.iter().enumerate().skip(1) {
             assert_eq!(
-                data2[i], 0,
+                coeff, 0,
                 "AC coefficient {} should be zero for uniform input",
                 i
             );
@@ -396,7 +400,7 @@ mod tests {
         // Just verify output is in reasonable range
         for (i, &val) in output.iter().enumerate() {
             assert!(
-                val >= 100 && val <= 180,
+                (100..=180).contains(&val),
                 "output[{}] = {} out of expected range",
                 i,
                 val

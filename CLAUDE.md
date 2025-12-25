@@ -37,8 +37,8 @@ mode. Use `Encoder::max_compression()` for equivalent behavior.
 
 | Configuration | Rust (ms) | C (ms) | Ratio | Notes |
 |---------------|-----------|--------|-------|-------|
-| Baseline (no opts) | 1.73 | 0.46 | 3.8x slower | |
-| Trellis AC+DC | 10.87 | 11.58 | **0.94x faster** | |
+| Baseline (no opts) | 1.73 | 0.45 | 3.9x slower | |
+| Trellis AC+DC | 11.13 | 11.72 | **0.95x faster** | |
 | Progressive* | 4.58 | 11.25 | **0.41x faster** | See note below |
 | Max compression* | 14.44 | 24.04 | **0.60x faster** | See note below |
 
@@ -51,8 +51,8 @@ mode. Use `Encoder::max_compression()` for equivalent behavior.
 
 **Key findings:**
 - AVX2 DCT intrinsics provide 26% speedup for baseline encoding
-- Trellis mode with AVX2 is now faster than C mozjpeg
-- Color conversion uses SIMD (wide crate) but could benefit from AVX2
+- Color conversion uses i32x8 (AVX2) for 8 pixels at a time
+- Trellis mode with AVX2 is now 5% faster than C mozjpeg
 
 **\* Progressive mode note:** Both Rust and C support `optimize_scans` which tries multiple
 scan configurations to find the smallest output. Progressive encoding now works correctly

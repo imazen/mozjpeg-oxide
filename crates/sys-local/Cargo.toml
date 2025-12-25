@@ -1,5 +1,5 @@
 [package]
-name = "mozjpeg-sys-local"
+name = "sys-local"
 version = "0.1.0"
 edition = "2021"
 description = "Local FFI bindings to mozjpeg with test exports"

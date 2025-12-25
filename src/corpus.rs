@@ -97,7 +97,7 @@ pub fn all_corpus_dirs() -> Vec<PathBuf> {
 /// These are small test images bundled with the crate for CI.
 pub fn bundled_test_images_dir() -> Option<PathBuf> {
     let project_root = project_root()?;
-    let test_images = project_root.join("mozjpeg-oxide").join("tests").join("images");
+    let test_images = project_root.join("tests").join("images");
     if test_images.is_dir() {
         Some(test_images)
     } else {
@@ -120,12 +120,7 @@ pub fn bundled_test_image(name: &str) -> Option<PathBuf> {
 fn project_root() -> Option<PathBuf> {
     // Try CARGO_MANIFEST_DIR first (works in tests/examples)
     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
-        let manifest_path = PathBuf::from(manifest_dir);
-        // If we're in mozjpeg-oxide/, go up one level
-        if manifest_path.file_name()?.to_str()? == "mozjpeg-oxide" {
-            return manifest_path.parent().map(|p| p.to_path_buf());
-        }
-        return Some(manifest_path);
+        return Some(PathBuf::from(manifest_dir));
     }
 
     // Fall back to current directory

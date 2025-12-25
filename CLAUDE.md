@@ -10,7 +10,7 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
 
 ## Current Status
 
-**191 tests passing** (153 unit + 8 codec comparison + 11 FFI comparison + 5 FFI validation + 9 mozjpeg-sys-local + 5 encoder validation)
+**191 tests passing** (153 unit + 8 codec comparison + 11 FFI comparison + 5 FFI validation + 9 sys-local + 5 encoder validation)
 
 ### Compression Results vs C mozjpeg
 
@@ -151,10 +151,10 @@ Previously reported "max diff ~11" was due to comparing different encoding modes
 ### Validation Approach
 - Validate equivalence **layer by layer**, not just end-to-end
 - Use `mozjpeg-sys` from crates.io for basic FFI validation
-- Use `mozjpeg-sys-local` (in workspace) for granular internal function testing
+- Use `sys-local` (in `crates/`) for granular internal function testing
   - Builds from local `../mozjpeg` C source with test exports
   - C code has been instrumented with `mozjpeg_test_*` functions
-  - Tests in `mozjpeg/tests/ffi_comparison.rs` compare Rust vs C implementations
+  - Tests in `tests/ffi_comparison.rs` compare Rust vs C implementations
 
 ### Golden Rule: Never Delete Instrumentation
 **NEVER delete tests, FFI comparisons, or instrumentation code.** These are essential for:
@@ -260,38 +260,38 @@ let encoder = Encoder::fastest().overshoot_deringing(false); // fastest disables
 ## Architecture
 
 ```
-mozjpeg-oxide/
-├── mozjpeg/                    # Main library crate
-│   ├── src/
-│   │   ├── lib.rs              # Module exports, public API
-│   │   ├── consts.rs           # Layer 0: Constants, tables, markers
-│   │   ├── types.rs            # Layer 0: ColorSpace, ScanInfo, etc.
-│   │   ├── error.rs            # Error types
-│   │   ├── quant.rs            # Layer 1: Quantization tables
-│   │   ├── huffman.rs          # Layer 1: Huffman table construction
-│   │   ├── dct.rs              # Layer 2: Forward DCT (Loeffler)
-│   │   ├── color.rs            # Layer 2: RGB→YCbCr conversion
-│   │   ├── sample.rs           # Layer 2: Chroma subsampling
-│   │   ├── deringing.rs        # Layer 2: Overshoot deringing (pre-DCT)
-│   │   ├── bitstream.rs        # Layer 3: Bit-level I/O
-│   │   ├── entropy.rs          # Layer 4: Huffman encoding
-│   │   ├── trellis.rs          # Layer 4: Trellis quantization
-│   │   ├── progressive.rs      # Layer 5: Progressive scans
-│   │   ├── marker.rs           # Layer 6: JPEG markers
-│   │   ├── encode.rs           # Layer 6: Encoder pipeline
-│   │   └── test_encoder.rs     # Unified test API for Rust vs C comparison
-│   ├── tests/
-│   │   ├── ffi_validation.rs   # crates.io mozjpeg-sys tests
-│   │   └── ffi_comparison.rs   # Local FFI granular comparison
-│   └── examples/
-│       ├── encode_permutations.rs  # Generate all flag/quality combinations
-│       ├── test_edge_cropping.rs   # Test non-8-aligned dimensions
-│       ├── debug_rust_vs_c.rs      # Debug encoder differences
-│       └── debug_edge_padding.rs   # Debug padding order
-├── mozjpeg-sys/                # Local FFI bindings (builds from ../mozjpeg)
-│   ├── build.rs                # CMake integration
-│   └── src/lib.rs              # FFI declarations + test exports
-└── ../mozjpeg/                 # Instrumented C mozjpeg fork
+mozjpeg-oxide/                  # Repository root IS the main crate
+├── src/
+│   ├── lib.rs                  # Module exports, public API
+│   ├── consts.rs               # Layer 0: Constants, tables, markers
+│   ├── types.rs                # Layer 0: ColorSpace, ScanInfo, etc.
+│   ├── error.rs                # Error types
+│   ├── quant.rs                # Layer 1: Quantization tables
+│   ├── huffman.rs              # Layer 1: Huffman table construction
+│   ├── dct.rs                  # Layer 2: Forward DCT (Loeffler)
+│   ├── color.rs                # Layer 2: RGB→YCbCr conversion
+│   ├── sample.rs               # Layer 2: Chroma subsampling
+│   ├── deringing.rs            # Layer 2: Overshoot deringing (pre-DCT)
+│   ├── bitstream.rs            # Layer 3: Bit-level I/O
+│   ├── entropy.rs              # Layer 4: Huffman encoding
+│   ├── trellis.rs              # Layer 4: Trellis quantization
+│   ├── progressive.rs          # Layer 5: Progressive scans
+│   ├── marker.rs               # Layer 6: JPEG markers
+│   ├── encode.rs               # Layer 6: Encoder pipeline
+│   └── test_encoder.rs         # Unified test API for Rust vs C comparison
+├── tests/
+│   ├── ffi_validation.rs       # crates.io mozjpeg-sys tests
+│   └── ffi_comparison.rs       # Local FFI granular comparison
+├── examples/
+│   └── pareto_benchmark.rs     # Benchmark vs C mozjpeg
+├── crates/
+│   └── sys-local/              # Local FFI bindings (builds from ../mozjpeg)
+│       ├── build.rs            # CMake integration
+│       └── src/lib.rs          # FFI declarations + test exports
+├── benchmark/                  # Reproducible benchmark infrastructure
+│   ├── Dockerfile
+│   └── plot_pareto.py
+└── ../mozjpeg/                 # Instrumented C mozjpeg fork (external)
     ├── mozjpeg_test_exports.c  # Test export implementations
     └── mozjpeg_test_exports.h  # Test export declarations
 ```
@@ -327,10 +327,10 @@ This ensures apples-to-apples comparison by using identical settings.
 
 ```bash
 cargo test                           # Run all tests
-cargo test huffman                  # Run specific module tests
+cargo test huffman                   # Run specific module tests
 cargo test --test ffi_validation    # Run crates.io FFI tests
 cargo test --test ffi_comparison    # Run local FFI comparison tests
-cargo test -p mozjpeg-sys-local     # Run local mozjpeg-sys tests
+cargo test -p sys-local             # Run sys-local tests
 ```
 
 ### Test Corpus
@@ -351,7 +351,7 @@ export CODEC_CORPUS_DIR=/path/to/codec-corpus
 The corpus utilities in `mozjpeg_oxide::corpus` handle path resolution:
 - Checks `MOZJPEG_CORPUS_DIR` and `CODEC_CORPUS_DIR` environment variables
 - Falls back to `./corpus/` in project root
-- Bundled test images always available at `mozjpeg/tests/images/`
+- Bundled test images always available at `tests/images/`
 
 ### CI/CD
 
@@ -363,7 +363,7 @@ GitHub Actions workflow runs on push/PR:
 ## Dependencies
 
 - `mozjpeg-sys = "2.2"` (dev) - FFI validation against C mozjpeg
-- `mozjpeg-sys-local` (workspace) - Local FFI with granular test exports
+- `sys-local` (in `crates/`) - Local FFI with granular test exports
 - `bytemuck = "1.14"` - Safe transmutes (for future SIMD)
 - `dssim`, `ssimulacra2` (dev) - Perceptual quality metrics
 - `codec-eval` (dev) - From https://github.com/imazen/codec-comparison

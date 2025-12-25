@@ -2,8 +2,11 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    // Path to the local mozjpeg source
+    // Path to the local mozjpeg source (sibling of project root)
+    // crates/sys-local -> crates -> project_root -> parent -> mozjpeg
     let mozjpeg_src = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+        .parent()
+        .unwrap()
         .parent()
         .unwrap()
         .parent()

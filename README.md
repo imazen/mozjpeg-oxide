@@ -71,7 +71,7 @@ Quality measured using:
 
 ### Pareto Front Visualization
 
-![SSIMULACRA2 vs BPP](../benchmark/pareto_ssimulacra2.svg)
+![SSIMULACRA2 vs BPP](benchmark/pareto_ssimulacra2.svg)
 
 ### Reproducibility
 

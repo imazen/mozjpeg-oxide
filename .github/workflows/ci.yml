@@ -48,13 +48,13 @@ jobs:
         run: cargo build --workspace
 
       - name: Run unit tests
-        run: cargo test --lib -p mozjpeg
+        run: cargo test --lib
 
       - name: Run codec comparison tests
-        run: cargo test --test codec_comparison -p mozjpeg
+        run: cargo test --test codec_comparison
 
       - name: Run FFI validation tests (crates.io mozjpeg-sys)
-        run: cargo test --test ffi_validation -p mozjpeg
+        run: cargo test --test ffi_validation
 
   # Separate job for tests requiring local mozjpeg source
   # This is disabled by default as it requires cloning the C mozjpeg repo
@@ -80,10 +80,10 @@ jobs:
         uses: dtolnay/rust-action@stable
 
       - name: Run FFI comparison tests
-        run: cargo test --test ffi_comparison -p mozjpeg
+        run: cargo test --test ffi_comparison
 
-      - name: Run mozjpeg-sys-local tests
-        run: cargo test -p mozjpeg-sys-local
+      - name: Run sys-local tests
+        run: cargo test -p sys-local
 
   # Documentation build
   docs:

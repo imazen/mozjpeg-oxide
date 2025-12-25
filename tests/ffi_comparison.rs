@@ -3,10 +3,10 @@
 //! These tests compare our Rust implementations against the C mozjpeg library
 //! at a granular level to ensure correctness.
 //!
-//! Uses mozjpeg-sys-local (dev-dependency) which builds from local C source.
+//! Uses sys-local (dev-dependency) which builds from local C source.
 
 use mozjpeg_oxide::{color, dct, quant, sample};
-use mozjpeg_sys_local as ffi;
+use sys_local as ffi;
 
 /// Test forward DCT matches C implementation
 #[test]

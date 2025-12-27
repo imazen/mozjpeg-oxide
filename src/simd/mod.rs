@@ -54,6 +54,7 @@ pub type ColorConvertFn = fn(&[u8], &mut [u8], &mut [u8], &mut [u8], usize);
 /// for the current CPU. Create once at startup and reuse.
 #[derive(Clone, Copy)]
 pub struct SimdOps {
+    // Note: Debug is implemented manually below since fn pointers print as addresses
     /// Forward DCT function
     pub forward_dct: ForwardDctFn,
     /// RGB to YCbCr conversion function
@@ -97,6 +98,22 @@ impl SimdOps {
 impl Default for SimdOps {
     fn default() -> Self {
         Self::detect()
+    }
+}
+
+impl std::fmt::Debug for SimdOps {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Just indicate which implementation is in use, not the pointer addresses
+        #[cfg(target_arch = "x86_64")]
+        let variant = if is_x86_feature_detected!("avx2") {
+            "AVX2"
+        } else {
+            "Scalar"
+        };
+        #[cfg(not(target_arch = "x86_64"))]
+        let variant = "Scalar";
+
+        f.debug_struct("SimdOps").field("variant", &variant).finish()
     }
 }
 

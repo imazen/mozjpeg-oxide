@@ -34,6 +34,7 @@ png = ["dep:png"]
 bytemuck = "1.14"
 # Optional PNG support for corpus loading
 png = { version = "0.17", optional = true }
+# Used by dct.rs and color.rs for portable SIMD
 wide = "1.1.1"
 
 [dev-dependencies]

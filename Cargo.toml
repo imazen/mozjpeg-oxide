@@ -26,7 +26,11 @@ members = ["crates/*"]
 
 [features]
 default = []
-simd = []  # Enable explicit SIMD intrinsics for x86_64
+# Use hand-written SIMD intrinsics for ~15% better DCT/color performance.
+# Without this, uses `multiversion` autovectorization (safe, ~87% of intrinsics perf).
+simd-intrinsics = []
+# Legacy alias
+simd = ["simd-intrinsics"]
 # Enable PNG loading in corpus module (enabled by default in dev)
 png = ["dep:png"]
 

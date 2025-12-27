@@ -133,7 +133,9 @@ impl std::fmt::Debug for SimdOps {
         #[cfg(not(target_arch = "x86_64"))]
         let variant = "Scalar";
 
-        f.debug_struct("SimdOps").field("variant", &variant).finish()
+        f.debug_struct("SimdOps")
+            .field("variant", &variant)
+            .finish()
     }
 }
 

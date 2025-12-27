@@ -23,7 +23,6 @@ use crate::consts::{
     DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES, JPEG_NATURAL_ORDER,
 };
 use crate::deringing::preprocess_deringing;
-use crate::simd::SimdOps;
 use crate::entropy::{EntropyEncoder, ProgressiveEncoder, ProgressiveSymbolCounter, SymbolCounter};
 use crate::error::{Error, Result};
 use crate::huffman::FrequencyCounter;
@@ -33,6 +32,7 @@ use crate::progressive::{generate_baseline_scan, generate_minimal_progressive_sc
 use crate::quant::{create_quant_tables, quantize_block};
 use crate::sample;
 use crate::scan_optimize::{generate_search_scans, ScanSearchConfig, ScanSelector};
+use crate::simd::SimdOps;
 use crate::trellis::{dc_trellis_optimize_indexed, trellis_quantize_block};
 use crate::types::{ComponentInfo, Subsampling, TrellisConfig};
 

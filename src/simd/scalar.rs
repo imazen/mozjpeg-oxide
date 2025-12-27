@@ -46,7 +46,11 @@ pub fn rgb_to_ycbcr(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
     let cr = ((FIX_0_50000 * r - FIX_0_41869 * g - FIX_0_08131 * b + ONE_HALF) >> SCALEBITS)
         + CBCR_CENTER;
 
-    (y.clamp(0, 255) as u8, cb.clamp(0, 255) as u8, cr.clamp(0, 255) as u8)
+    (
+        y.clamp(0, 255) as u8,
+        cb.clamp(0, 255) as u8,
+        cr.clamp(0, 255) as u8,
+    )
 }
 
 /// RGB to YCbCr conversion for a buffer.

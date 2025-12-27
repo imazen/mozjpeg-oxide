@@ -179,13 +179,25 @@ unsafe fn dct_1d_pass_avx2(data: &mut [__m256i; 8], pass1: bool) {
     let z1 = _mm256_mullo_epi32(_mm256_add_epi32(tmp12, tmp13), fix_0_541196100);
     let (out2, out6) = if pass1 {
         (
-            descale_pass1(_mm256_add_epi32(z1, _mm256_mullo_epi32(tmp13, fix_0_765366865))),
-            descale_pass1(_mm256_sub_epi32(z1, _mm256_mullo_epi32(tmp12, fix_1_847759065))),
+            descale_pass1(_mm256_add_epi32(
+                z1,
+                _mm256_mullo_epi32(tmp13, fix_0_765366865),
+            )),
+            descale_pass1(_mm256_sub_epi32(
+                z1,
+                _mm256_mullo_epi32(tmp12, fix_1_847759065),
+            )),
         )
     } else {
         (
-            descale_pass2(_mm256_add_epi32(z1, _mm256_mullo_epi32(tmp13, fix_0_765366865))),
-            descale_pass2(_mm256_sub_epi32(z1, _mm256_mullo_epi32(tmp12, fix_1_847759065))),
+            descale_pass2(_mm256_add_epi32(
+                z1,
+                _mm256_mullo_epi32(tmp13, fix_0_765366865),
+            )),
+            descale_pass2(_mm256_sub_epi32(
+                z1,
+                _mm256_mullo_epi32(tmp12, fix_1_847759065),
+            )),
         )
     };
 
@@ -254,14 +266,38 @@ pub unsafe fn forward_dct_8x8_avx2(samples: &[i16; DCTSIZE2], coeffs: &mut [i16;
     transpose_8x8_avx2(&mut rows);
     dct_1d_pass_avx2(&mut rows, false);
 
-    _mm_storeu_si128(coeffs.as_mut_ptr().add(0) as *mut __m128i, pack_i32_to_i16(rows[0]));
-    _mm_storeu_si128(coeffs.as_mut_ptr().add(8) as *mut __m128i, pack_i32_to_i16(rows[1]));
-    _mm_storeu_si128(coeffs.as_mut_ptr().add(16) as *mut __m128i, pack_i32_to_i16(rows[2]));
-    _mm_storeu_si128(coeffs.as_mut_ptr().add(24) as *mut __m128i, pack_i32_to_i16(rows[3]));
-    _mm_storeu_si128(coeffs.as_mut_ptr().add(32) as *mut __m128i, pack_i32_to_i16(rows[4]));
-    _mm_storeu_si128(coeffs.as_mut_ptr().add(40) as *mut __m128i, pack_i32_to_i16(rows[5]));
-    _mm_storeu_si128(coeffs.as_mut_ptr().add(48) as *mut __m128i, pack_i32_to_i16(rows[6]));
-    _mm_storeu_si128(coeffs.as_mut_ptr().add(56) as *mut __m128i, pack_i32_to_i16(rows[7]));
+    _mm_storeu_si128(
+        coeffs.as_mut_ptr().add(0) as *mut __m128i,
+        pack_i32_to_i16(rows[0]),
+    );
+    _mm_storeu_si128(
+        coeffs.as_mut_ptr().add(8) as *mut __m128i,
+        pack_i32_to_i16(rows[1]),
+    );
+    _mm_storeu_si128(
+        coeffs.as_mut_ptr().add(16) as *mut __m128i,
+        pack_i32_to_i16(rows[2]),
+    );
+    _mm_storeu_si128(
+        coeffs.as_mut_ptr().add(24) as *mut __m128i,
+        pack_i32_to_i16(rows[3]),
+    );
+    _mm_storeu_si128(
+        coeffs.as_mut_ptr().add(32) as *mut __m128i,
+        pack_i32_to_i16(rows[4]),
+    );
+    _mm_storeu_si128(
+        coeffs.as_mut_ptr().add(40) as *mut __m128i,
+        pack_i32_to_i16(rows[5]),
+    );
+    _mm_storeu_si128(
+        coeffs.as_mut_ptr().add(48) as *mut __m128i,
+        pack_i32_to_i16(rows[6]),
+    );
+    _mm_storeu_si128(
+        coeffs.as_mut_ptr().add(56) as *mut __m128i,
+        pack_i32_to_i16(rows[7]),
+    );
 }
 
 /// Safe wrapper for forward DCT that can be used as a function pointer.
@@ -344,7 +380,10 @@ unsafe fn convert_rgb_to_ycbcr_avx2_inner(
         // Y = 0.29900 * R + 0.58700 * G + 0.11400 * B
         let y = _mm256_srai_epi32::<SCALEBITS>(_mm256_add_epi32(
             _mm256_add_epi32(
-                _mm256_add_epi32(_mm256_mullo_epi32(fix_y_r, r), _mm256_mullo_epi32(fix_y_g, g)),
+                _mm256_add_epi32(
+                    _mm256_mullo_epi32(fix_y_r, r),
+                    _mm256_mullo_epi32(fix_y_g, g),
+                ),
                 _mm256_mullo_epi32(fix_y_b, b),
             ),
             half,
@@ -425,8 +464,10 @@ unsafe fn convert_rgb_to_ycbcr_avx2_inner(
         let b = rgb[i * 3 + 2] as i32;
 
         let y = (FIX_Y_R * r + FIX_Y_G * g + FIX_Y_B * b + ONE_HALF) >> SCALEBITS;
-        let cb = ((FIX_CB_R * r + FIX_CB_G * g + FIX_CB_B * b + ONE_HALF) >> SCALEBITS) + CBCR_CENTER;
-        let cr = ((FIX_CR_R * r + FIX_CR_G * g + FIX_CR_B * b + ONE_HALF) >> SCALEBITS) + CBCR_CENTER;
+        let cb =
+            ((FIX_CB_R * r + FIX_CB_G * g + FIX_CB_B * b + ONE_HALF) >> SCALEBITS) + CBCR_CENTER;
+        let cr =
+            ((FIX_CR_R * r + FIX_CR_G * g + FIX_CR_B * b + ONE_HALF) >> SCALEBITS) + CBCR_CENTER;
 
         y_out[i] = y.clamp(0, 255) as u8;
         cb_out[i] = cb.clamp(0, 255) as u8;

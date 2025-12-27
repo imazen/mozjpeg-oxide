@@ -138,7 +138,7 @@ pub use encode::Encoder;
 pub use error::{Error, Result};
 
 /// Image configuration types.
-pub use types::{Subsampling, TrellisConfig};
+pub use types::{PixelDensity, Subsampling, TrellisConfig};
 
 /// Quantization table variants (ImageMagick, Flat, JPEG Annex K, etc.)
 pub use consts::QuantTableIdx;

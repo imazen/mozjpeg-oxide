@@ -6,6 +6,76 @@
 use crate::consts::{DCTSIZE2, MAX_COMPS_IN_SCAN};
 
 // =============================================================================
+// Pixel Density
+// =============================================================================
+
+/// Pixel density unit for JFIF APP0 marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum DensityUnit {
+    /// No units - X/Y specify pixel aspect ratio only
+    #[default]
+    None = 0,
+    /// Dots per inch
+    DotsPerInch = 1,
+    /// Dots per centimeter
+    DotsPerCm = 2,
+}
+
+/// Pixel density specification for the JFIF APP0 marker.
+///
+/// This affects how the image is displayed at its "natural" size,
+/// but most software ignores JFIF density in favor of EXIF metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PixelDensity {
+    /// Density unit
+    pub unit: DensityUnit,
+    /// Horizontal density (or aspect ratio numerator if unit is None)
+    pub x: u16,
+    /// Vertical density (or aspect ratio denominator if unit is None)
+    pub y: u16,
+}
+
+impl Default for PixelDensity {
+    fn default() -> Self {
+        Self {
+            unit: DensityUnit::DotsPerInch,
+            x: 72,
+            y: 72,
+        }
+    }
+}
+
+impl PixelDensity {
+    /// Create density in dots per inch.
+    pub const fn dpi(x: u16, y: u16) -> Self {
+        Self {
+            unit: DensityUnit::DotsPerInch,
+            x,
+            y,
+        }
+    }
+
+    /// Create density in dots per centimeter.
+    pub const fn dpcm(x: u16, y: u16) -> Self {
+        Self {
+            unit: DensityUnit::DotsPerCm,
+            x,
+            y,
+        }
+    }
+
+    /// Create pixel aspect ratio (no physical units).
+    pub const fn aspect_ratio(x: u16, y: u16) -> Self {
+        Self {
+            unit: DensityUnit::None,
+            x,
+            y,
+        }
+    }
+}
+
+// =============================================================================
 // Color Spaces
 // =============================================================================
 

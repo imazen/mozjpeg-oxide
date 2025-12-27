@@ -34,7 +34,7 @@ use crate::sample;
 use crate::scan_optimize::{generate_search_scans, ScanSearchConfig, ScanSelector};
 use crate::simd::SimdOps;
 use crate::trellis::{dc_trellis_optimize_indexed, trellis_quantize_block};
-use crate::types::{ComponentInfo, Subsampling, TrellisConfig};
+use crate::types::{ComponentInfo, PixelDensity, Subsampling, TrellisConfig};
 
 /// Helper to allocate a Vec with fallible allocation.
 /// Returns Error::AllocationFailed if allocation fails.
@@ -66,6 +66,10 @@ pub struct Encoder {
     subsampling: Subsampling,
     /// Quantization table variant
     quant_table_idx: QuantTableIdx,
+    /// Custom luminance quantization table (overrides quant_table_idx if set)
+    custom_luma_qtable: Option<[u16; DCTSIZE2]>,
+    /// Custom chrominance quantization table (overrides quant_table_idx if set)
+    custom_chroma_qtable: Option<[u16; DCTSIZE2]>,
     /// Trellis quantization configuration
     trellis: TrellisConfig,
     /// Force baseline-compatible output
@@ -78,8 +82,14 @@ pub struct Encoder {
     optimize_scans: bool,
     /// Restart interval in MCUs (0 = disabled)
     restart_interval: u16,
+    /// Pixel density for JFIF APP0 marker
+    pixel_density: PixelDensity,
     /// EXIF data to embed (raw TIFF structure, without "Exif\0\0" header)
     exif_data: Option<Vec<u8>>,
+    /// ICC color profile to embed (will be chunked into APP2 markers)
+    icc_profile: Option<Vec<u8>>,
+    /// Custom APP markers to embed (marker number 0-15, data)
+    custom_markers: Vec<(u8, Vec<u8>)>,
     /// SIMD operations dispatch (detected once at construction)
     simd: SimdOps,
 }
@@ -107,13 +117,18 @@ impl Encoder {
             progressive: false,
             subsampling: Subsampling::S420,
             quant_table_idx: QuantTableIdx::ImageMagick,
+            custom_luma_qtable: None,
+            custom_chroma_qtable: None,
             trellis: TrellisConfig::default(),
             force_baseline: false,
             optimize_huffman: true,
             overshoot_deringing: true,
             optimize_scans: false,
             restart_interval: 0,
+            pixel_density: PixelDensity::default(),
             exif_data: None,
+            icc_profile: None,
+            custom_markers: Vec::new(),
             simd: SimdOps::detect(),
         }
     }
@@ -128,13 +143,18 @@ impl Encoder {
             progressive: true,
             subsampling: Subsampling::S420,
             quant_table_idx: QuantTableIdx::ImageMagick,
+            custom_luma_qtable: None,
+            custom_chroma_qtable: None,
             trellis: TrellisConfig::default(),
             force_baseline: false,
             optimize_huffman: true,
             overshoot_deringing: true,
             optimize_scans: true,
             restart_interval: 0,
+            pixel_density: PixelDensity::default(),
             exif_data: None,
+            icc_profile: None,
+            custom_markers: Vec::new(),
             simd: SimdOps::detect(),
         }
     }
@@ -149,13 +169,18 @@ impl Encoder {
             progressive: false,
             subsampling: Subsampling::S420,
             quant_table_idx: QuantTableIdx::ImageMagick,
+            custom_luma_qtable: None,
+            custom_chroma_qtable: None,
             trellis: TrellisConfig::disabled(),
             force_baseline: true,
             optimize_huffman: false,
             overshoot_deringing: false,
             optimize_scans: false,
             restart_interval: 0,
+            pixel_density: PixelDensity::default(),
             exif_data: None,
+            icc_profile: None,
+            custom_markers: Vec::new(),
             simd: SimdOps::detect(),
         }
     }
@@ -252,6 +277,78 @@ impl Encoder {
         self
     }
 
+    /// Set pixel density for the JFIF APP0 marker.
+    ///
+    /// This specifies the physical pixel density (DPI/DPC) or aspect ratio.
+    /// Note that most software ignores JFIF density in favor of EXIF metadata.
+    ///
+    /// # Example
+    /// ```
+    /// use mozjpeg_oxide::{Encoder, PixelDensity};
+    ///
+    /// let encoder = Encoder::new()
+    ///     .pixel_density(PixelDensity::dpi(300, 300)); // 300 DPI
+    /// ```
+    pub fn pixel_density(mut self, density: PixelDensity) -> Self {
+        self.pixel_density = density;
+        self
+    }
+
+    /// Set ICC color profile to embed.
+    ///
+    /// The profile will be embedded in APP2 markers with the standard
+    /// "ICC_PROFILE" identifier. Large profiles are automatically chunked.
+    ///
+    /// # Arguments
+    /// * `profile` - Raw ICC profile data
+    pub fn icc_profile(mut self, profile: Vec<u8>) -> Self {
+        self.icc_profile = if profile.is_empty() {
+            None
+        } else {
+            Some(profile)
+        };
+        self
+    }
+
+    /// Add a custom APP marker.
+    ///
+    /// # Arguments
+    /// * `app_num` - APP marker number (0-15, e.g., 1 for EXIF, 2 for ICC)
+    /// * `data` - Raw marker data (including any identifier prefix)
+    ///
+    /// Multiple markers with the same number are allowed.
+    /// Markers are written in the order they are added.
+    pub fn add_marker(mut self, app_num: u8, data: Vec<u8>) -> Self {
+        if app_num <= 15 && !data.is_empty() {
+            self.custom_markers.push((app_num, data));
+        }
+        self
+    }
+
+    /// Set custom luminance quantization table.
+    ///
+    /// This overrides the table selected by `quant_tables()`.
+    /// Values should be in natural (row-major) order, not zigzag.
+    ///
+    /// # Arguments
+    /// * `table` - 64 quantization values (quality scaling still applies)
+    pub fn custom_luma_qtable(mut self, table: [u16; DCTSIZE2]) -> Self {
+        self.custom_luma_qtable = Some(table);
+        self
+    }
+
+    /// Set custom chrominance quantization table.
+    ///
+    /// This overrides the table selected by `quant_tables()`.
+    /// Values should be in natural (row-major) order, not zigzag.
+    ///
+    /// # Arguments
+    /// * `table` - 64 quantization values (quality scaling still applies)
+    pub fn custom_chroma_qtable(mut self, table: [u16; DCTSIZE2]) -> Self {
+        self.custom_chroma_qtable = Some(table);
+        self
+    }
+
     /// Encode RGB image data to JPEG.
     ///
     /// # Arguments
@@ -341,8 +438,13 @@ impl Encoder {
         sample::expand_to_mcu(y_plane, width, height, &mut y_mcu, mcu_width, mcu_height);
 
         // Create quantization table (only luma needed)
-        let (luma_qtable, _) =
-            create_quant_tables(self.quality, self.quant_table_idx, self.force_baseline);
+        let luma_qtable = if let Some(ref custom) = self.custom_luma_qtable {
+            crate::quant::create_quant_table(custom, self.quality, self.force_baseline)
+        } else {
+            let (luma, _) =
+                create_quant_tables(self.quality, self.quant_table_idx, self.force_baseline);
+            luma
+        };
 
         // Create Huffman tables (only luma needed)
         let dc_luma_huff = create_std_dc_luma_table();
@@ -359,12 +461,26 @@ impl Encoder {
         // SOI
         marker_writer.write_soi()?;
 
-        // APP0 (JFIF)
-        marker_writer.write_jfif_app0(1, 72, 72)?;
+        // APP0 (JFIF) with pixel density
+        marker_writer.write_jfif_app0(
+            self.pixel_density.unit as u8,
+            self.pixel_density.x,
+            self.pixel_density.y,
+        )?;
 
         // EXIF (if present)
         if let Some(ref exif) = self.exif_data {
             marker_writer.write_app1_exif(exif)?;
+        }
+
+        // ICC profile (if present)
+        if let Some(ref icc) = self.icc_profile {
+            marker_writer.write_icc_profile(icc)?;
+        }
+
+        // Custom APP markers
+        for (app_num, data) in &self.custom_markers {
+            marker_writer.write_app(*app_num, data)?;
         }
 
         // DQT (only luma table for grayscale)
@@ -611,8 +727,21 @@ impl Encoder {
         );
 
         // Step 4: Create quantization tables
-        let (luma_qtable, chroma_qtable) =
-            create_quant_tables(self.quality, self.quant_table_idx, self.force_baseline);
+        let (luma_qtable, chroma_qtable) = {
+            let (default_luma, default_chroma) =
+                create_quant_tables(self.quality, self.quant_table_idx, self.force_baseline);
+            let luma = if let Some(ref custom) = self.custom_luma_qtable {
+                crate::quant::create_quant_table(custom, self.quality, self.force_baseline)
+            } else {
+                default_luma
+            };
+            let chroma = if let Some(ref custom) = self.custom_chroma_qtable {
+                crate::quant::create_quant_table(custom, self.quality, self.force_baseline)
+            } else {
+                default_chroma
+            };
+            (luma, chroma)
+        };
 
         // Step 5: Create Huffman tables (standard tables)
         let dc_luma_huff = create_std_dc_luma_table();
@@ -634,12 +763,26 @@ impl Encoder {
         // SOI
         marker_writer.write_soi()?;
 
-        // APP0 (JFIF)
-        marker_writer.write_jfif_app0(1, 72, 72)?;
+        // APP0 (JFIF) with pixel density
+        marker_writer.write_jfif_app0(
+            self.pixel_density.unit as u8,
+            self.pixel_density.x,
+            self.pixel_density.y,
+        )?;
 
         // APP1 (EXIF) - if present
         if let Some(ref exif) = self.exif_data {
             marker_writer.write_app1_exif(exif)?;
+        }
+
+        // ICC profile (if present)
+        if let Some(ref icc) = self.icc_profile {
+            marker_writer.write_icc_profile(icc)?;
+        }
+
+        // Custom APP markers
+        for (app_num, data) in &self.custom_markers {
+            marker_writer.write_app(*app_num, data)?;
         }
 
         // DQT (quantization tables in zigzag order) - combined into single marker

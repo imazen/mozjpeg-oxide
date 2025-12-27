@@ -445,6 +445,58 @@ impl<W: Write> MarkerWriter<W> {
     pub fn get_mut(&mut self) -> &mut W {
         &mut self.output
     }
+
+    /// Write ICC color profile as APP2 markers.
+    ///
+    /// Large profiles are automatically chunked into multiple APP2 markers
+    /// (max 65533 bytes per marker, minus 14 bytes overhead = 65519 data bytes).
+    ///
+    /// # Arguments
+    /// * `profile` - Raw ICC profile data
+    pub fn write_icc_profile(&mut self, profile: &[u8]) -> std::io::Result<()> {
+        const ICC_OVERHEAD: usize = 14; // "ICC_PROFILE\0" + seq + count
+        const MAX_BYTES_IN_MARKER: usize = 65533;
+        const MAX_DATA_BYTES: usize = MAX_BYTES_IN_MARKER - ICC_OVERHEAD;
+
+        if profile.is_empty() {
+            return Ok(());
+        }
+
+        let chunks: Vec<&[u8]> = profile.chunks(MAX_DATA_BYTES).collect();
+        let num_chunks = chunks.len();
+
+        if num_chunks > 255 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "ICC profile too large (exceeds 255 chunks)",
+            ));
+        }
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            // APP2 marker
+            self.emit_marker(0xE2)?;
+
+            // Length = 2 + 12 ("ICC_PROFILE\0") + 2 (seq/count) + data
+            let len = 2 + 12 + 2 + chunk.len();
+            self.emit_2bytes(len as u16)?;
+
+            // ICC_PROFILE identifier
+            for &b in b"ICC_PROFILE\0" {
+                self.emit_byte(b)?;
+            }
+
+            // Sequence number (1-based) and total count
+            self.emit_byte((i + 1) as u8)?;
+            self.emit_byte(num_chunks as u8)?;
+
+            // Profile data chunk
+            for &b in *chunk {
+                self.emit_byte(b)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

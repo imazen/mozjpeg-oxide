@@ -249,7 +249,7 @@ pub mod corpus;
 /// # Ok(())
 /// # }
 /// ```
-pub use encode::Encoder;
+pub use encode::{Encoder, EncodingStream, StreamingEncoder};
 
 /// Error type for encoding operations.
 ///

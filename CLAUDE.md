@@ -15,11 +15,17 @@
 3. If optimize_scans selects wrong scans, fix the trial encoder - don't disable it
 4. Document gaps honestly in README, but keep features enabled
 
-**Root cause of progressive parity gap:**
+**Root cause of optimize_scans producing larger files:**
+- Trial encoder uses per-scan optimal Huffman tables (correct, matches C mozjpeg)
+- Actual encoder uses global Huffman tables (incorrect, all scans share tables)
+- This mismatch means trial estimates don't match actual encoded sizes
+- FIX: Make actual encoder use per-scan Huffman tables when optimize_scans=true
+
+**Root cause of progressive parity gap at high quality:**
 - The 9-scan SA script in `generate_mozjpeg_max_compression_scans()` is CORRECT
-- The SA encoder (`encode_ac_first` with Al>0, refinement scans) needs verification
-- The trial encoder may not accurately estimate SA scan costs
-- FIX: Add FFI comparison test for SA encoding, not disable the feature
+- Our simple 4-scan script works well at Q50-Q85 but falls behind at Q90+
+- SA encoding (`encode_ac_first` with Al>0) needs verification against C mozjpeg
+- FIX: Add FFI comparison test for SA encoding, then use SA script by default
 
 ### DO NOT relax test tolerances
 

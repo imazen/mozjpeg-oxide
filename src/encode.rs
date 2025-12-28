@@ -44,7 +44,10 @@ use crate::error::{Error, Result};
 use crate::huffman::FrequencyCounter;
 use crate::huffman::{DerivedTable, HuffTable};
 use crate::marker::MarkerWriter;
-use crate::progressive::{generate_baseline_scan, generate_minimal_progressive_scans};
+use crate::progressive::{
+    generate_baseline_scan, generate_minimal_progressive_scans,
+    generate_mozjpeg_max_compression_scans,
+};
 use crate::quant::{create_quant_tables, quantize_block};
 use crate::sample;
 use crate::scan_optimize::{generate_search_scans, ScanSearchConfig, ScanSelector};
@@ -1003,16 +1006,8 @@ impl Encoder {
                     &ac_chroma_derived,
                 )?
             } else {
-                // Use minimal progressive scans (4 scans, no successive approximation)
-                //
-                // TODO: The 9-scan JCP_MAX_COMPRESSION script with successive
-                // approximation has a ~28% size regression. This is due to a bug in
-                // the refinement scan encoding or Huffman optimization. Investigation
-                // shows that even with identical scan scripts to C mozjpeg, Rust
-                // produces ~28% larger files with SA enabled.
-                //
-                // The count_ac_refine function was added but doesn't fully fix the
-                // issue. The refinement encoder (encode_ac_refine) may have bugs.
+                // Temporarily use minimal progressive script to debug
+                // TODO: restore generate_mozjpeg_max_compression_scans(3) after fixing SA
                 generate_minimal_progressive_scans(3)
             };
 
@@ -2073,7 +2068,7 @@ impl Encoder {
             let total_actual = actual_block_rows * actual_block_cols;
             for block in blocks.iter().take(total_actual) {
                 if is_refinement {
-                    encoder.encode_ac_refine(block, scan.ss, scan.se, scan.al, ac_table)?;
+                    encoder.encode_ac_refine(block, scan.ss, scan.se, scan.ah, scan.al, ac_table)?;
                 } else {
                     encoder.encode_ac_first(block, scan.ss, scan.se, scan.al, ac_table)?;
                 }
@@ -2102,6 +2097,7 @@ impl Encoder {
                             &blocks[storage_idx],
                             scan.ss,
                             scan.se,
+                            scan.ah,
                             scan.al,
                             ac_table,
                         )?;
@@ -2192,7 +2188,7 @@ impl Encoder {
             let total_actual = actual_block_rows * actual_block_cols;
             for block in blocks.iter().take(total_actual) {
                 if is_refinement {
-                    counter.count_ac_refine(block, scan.ss, scan.se, scan.al, ac_freq);
+                    counter.count_ac_refine(block, scan.ss, scan.se, scan.ah, scan.al, ac_freq);
                 } else {
                     counter.count_ac_first(block, scan.ss, scan.se, scan.al, ac_freq);
                 }
@@ -2220,6 +2216,7 @@ impl Encoder {
                             &blocks[storage_idx],
                             scan.ss,
                             scan.se,
+                            scan.ah,
                             scan.al,
                             ac_freq,
                         );

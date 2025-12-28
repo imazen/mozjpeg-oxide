@@ -343,6 +343,10 @@ pub struct ProgressiveEncoder<'a, W: Write> {
     eobrun: u16,
     /// Whether to allow extended EOBRUN (requires optimized Huffman tables)
     allow_eobrun: bool,
+    /// Buffered correction bits for AC refinement scans.
+    /// These accumulate across blocks and are emitted with EOBRUN.
+    /// C mozjpeg calls this BE (Buffered Errors) with bit_buffer.
+    correction_bits: Vec<u32>,
 }
 
 impl<'a, W: Write> ProgressiveEncoder<'a, W> {
@@ -355,6 +359,7 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
             last_dc_val: [0; 4],
             eobrun: 0,
             allow_eobrun: true,
+            correction_bits: Vec::new(),
         }
     }
 
@@ -368,6 +373,7 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
             last_dc_val: [0; 4],
             eobrun: 0,
             allow_eobrun: false,
+            correction_bits: Vec::new(),
         }
     }
 
@@ -375,6 +381,7 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
     pub fn reset(&mut self) {
         self.last_dc_val = [0; 4];
         self.eobrun = 0;
+        self.correction_bits.clear();
     }
 
     /// Encode a DC scan (first pass, Ah=0).
@@ -533,55 +540,66 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
     /// This is more complex because we need to:
     /// 1. Output correction bits for previously non-zero coefficients
     /// 2. Output new non-zero coefficients with their correction bits
+    ///
+    /// # Arguments
+    /// * `block` - DCT coefficients in natural order
+    /// * `ss` - Spectral selection start (1..63)
+    /// * `se` - Spectral selection end (1..63)
+    /// * `ah` - Successive approximation high bit (previous Al)
+    /// * `al` - Successive approximation low bit (current precision)
+    /// * `ac_table` - Huffman table for AC
     pub fn encode_ac_refine(
         &mut self,
         block: &[i16; DCTSIZE2],
         ss: u8,
         se: u8,
+        _ah: u8,
         al: u8,
         ac_table: &DerivedTable,
     ) -> std::io::Result<()> {
-        // Point to current coefficient
-        let mut k = ss;
         let mut run = 0u32;
-        let mut pending_bits: Vec<u32> = Vec::new();
+        // br_start = index where THIS block's bits start in correction_bits.
+        // BE (before) bits are 0..br_start, BR (current block) bits are br_start..
+        let mut br_start = self.correction_bits.len();
 
-        // Find last non-zero coefficient in the band
-        let mut kex = se;
-        while kex >= ss {
-            let coef = block[JPEG_NATURAL_ORDER[kex as usize]];
-            if coef != 0 {
-                break;
-            }
-            kex -= 1;
-        }
-
-        while k <= se {
+        for k in ss..=se {
             let coef = block[JPEG_NATURAL_ORDER[k as usize]];
             let abs_coef = coef.unsigned_abs();
 
-            // Check if this is a previously-coded non-zero coefficient
+            // Check if this is a previously-coded non-zero coefficient.
+            // C mozjpeg: temp >>= Al, then if (temp > 1) it was previously coded.
+            // This is equivalent to: (abs_coef >> al) > 1
+            // Note: The first scan encoded coef if (abs >> (al+1)) != 0
+            //       In refinement, (abs >> al) > 1 implies (abs >> (al+1)) >= 1 > 0
             if (abs_coef >> al) > 1 {
-                // Already coded - just output the refinement bit
-                pending_bits.push(((abs_coef >> al) & 1) as u32);
+                // Already coded - just queue the refinement bit
+                // Use absolute value since magnitude bits are what we're refining
+                let correction_bit = ((abs_coef >> al) & 1) as u32;
+                self.correction_bits.push(correction_bit);
             } else if (abs_coef >> al) == 1 {
                 // New non-zero coefficient
-                // Flush EOBRUN if needed
+                // First, flush any pending EOBRUN with BE (previous blocks') correction bits
                 if self.eobrun > 0 {
-                    self.flush_eobrun(ac_table)?;
+                    self.flush_eobrun_be_bits(ac_table, br_start)?;
+                    // After flush, BE bits are gone but BR bits remain
+                    // Move BR bits to start of buffer
+                    let br_bits: Vec<u32> = self.correction_bits[br_start..].to_vec();
+                    self.correction_bits.clear();
+                    self.correction_bits.extend(br_bits);
+                    br_start = 0;
                 }
 
                 // Emit ZRL for runs of 16
                 while run >= 16 {
-                    // Emit ZRL with pending correction bits
+                    // Emit ZRL
                     let (code, size) = ac_table.get_code(0xF0);
                     self.writer.put_bits(code, size)?;
 
-                    // Output pending correction bits
-                    for &bit in &pending_bits {
+                    // Output correction bits accumulated so far in this block
+                    for &bit in &self.correction_bits[br_start..] {
                         self.writer.put_bits(bit, 1)?;
                     }
-                    pending_bits.clear();
+                    self.correction_bits.truncate(br_start);
                     run -= 16;
                 }
 
@@ -590,47 +608,130 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
                 let (code, size) = ac_table.get_code(symbol);
                 self.writer.put_bits(code, size)?;
 
-                // Sign bit
+                // Sign bit (1 for positive, 0 for negative)
                 let sign_bit = if coef < 0 { 0u32 } else { 1u32 };
                 self.writer.put_bits(sign_bit, 1)?;
 
-                // Output pending correction bits
-                for &bit in &pending_bits {
+                // Output correction bits accumulated so far in this block
+                for &bit in &self.correction_bits[br_start..] {
                     self.writer.put_bits(bit, 1)?;
                 }
-                pending_bits.clear();
+                self.correction_bits.truncate(br_start);
                 run = 0;
             } else {
                 // Zero coefficient - increment run
                 run += 1;
-            }
 
-            k += 1;
+                // If run reaches 16, emit ZRL immediately with correction bits.
+                if run == 16 {
+                    // Flush EOBRUN first if needed (with only BE bits)
+                    if self.eobrun > 0 {
+                        self.flush_eobrun_be_bits(ac_table, br_start)?;
+                        let br_bits: Vec<u32> = self.correction_bits[br_start..].to_vec();
+                        self.correction_bits.clear();
+                        self.correction_bits.extend(br_bits);
+                        br_start = 0;
+                    }
+
+                    let (code, size) = ac_table.get_code(0xF0);
+                    self.writer.put_bits(code, size)?;
+
+                    // Output correction bits accumulated so far in this block
+                    for &bit in &self.correction_bits[br_start..] {
+                        self.writer.put_bits(bit, 1)?;
+                    }
+                    self.correction_bits.truncate(br_start);
+                    run = 0;
+                }
+            }
         }
 
         // Handle remaining run (EOB)
-        if run > 0 {
+        // BR = bits accumulated in this block = correction_bits.len() - br_start
+        let br = self.correction_bits.len() - br_start;
+        if run > 0 || br > 0 {
             self.eobrun += 1;
-            // Standard tables only have EOB (0x00), not extended EOBRUN symbols.
-            // Flush after each block if EOBRUN is disabled.
-            if !self.allow_eobrun || self.eobrun == 0x7FFF {
-                self.flush_eobrun(ac_table)?;
-                for &bit in &pending_bits {
-                    self.writer.put_bits(bit, 1)?;
-                }
-                pending_bits.clear();
+            // Correction bits stay in self.correction_bits (they're already there)
+            // We force out the EOB if we risk either:
+            // 1. overflow of the EOB counter (0x7FFF max)
+            // 2. overflow of the correction bit buffer (use 1000 as max like C mozjpeg)
+            // 3. EOBRUN is disabled (standard tables)
+            if !self.allow_eobrun
+                || self.eobrun == 0x7FFF
+                || self.correction_bits.len() > (1000 - DCTSIZE2 + 1)
+            {
+                self.flush_eobrun_with_bits(ac_table)?;
             }
         }
 
-        // Store pending bits for later flush
-        // Note: In a full implementation, we'd need to track these across blocks
-        // For now, flush them with the EOBRUN
-        if !pending_bits.is_empty() && self.eobrun > 0 {
-            self.flush_eobrun(ac_table)?;
-            for &bit in &pending_bits {
-                self.writer.put_bits(bit, 1)?;
-            }
+        Ok(())
+    }
+
+    /// Flush the EOB run with only BE (previous blocks') correction bits.
+    /// BR (current block) bits at indices br_start.. are NOT output.
+    fn flush_eobrun_be_bits(
+        &mut self,
+        ac_table: &DerivedTable,
+        br_start: usize,
+    ) -> std::io::Result<()> {
+        if self.eobrun == 0 {
+            return Ok(());
         }
+
+        // Calculate EOBn symbol (n = floor(log2(EOBRUN)))
+        let nbits = 15 - self.eobrun.leading_zeros() as u8;
+
+        // Symbol for EOBn is nbits << 4 (run=0)
+        let symbol = nbits << 4;
+        let (code, size) = ac_table.get_code(symbol);
+        self.writer.put_bits(code, size)?;
+
+        // Output additional bits for EOBRUN
+        if nbits > 0 {
+            let mask = (1u16 << nbits) - 1;
+            let extra = (self.eobrun & mask) as u32;
+            self.writer.put_bits(extra, nbits)?;
+        }
+
+        self.eobrun = 0;
+
+        // Emit only BE bits (0..br_start), not BR bits
+        for &bit in &self.correction_bits[..br_start] {
+            self.writer.put_bits(bit, 1)?;
+        }
+        // Note: don't clear correction_bits here - caller will handle it
+
+        Ok(())
+    }
+
+    /// Flush the EOB run with all accumulated correction bits.
+    fn flush_eobrun_with_bits(&mut self, ac_table: &DerivedTable) -> std::io::Result<()> {
+        if self.eobrun == 0 {
+            return Ok(());
+        }
+
+        // Calculate EOBn symbol (n = floor(log2(EOBRUN)))
+        let nbits = 15 - self.eobrun.leading_zeros() as u8;
+
+        // Symbol for EOBn is nbits << 4 (run=0)
+        let symbol = nbits << 4;
+        let (code, size) = ac_table.get_code(symbol);
+        self.writer.put_bits(code, size)?;
+
+        // Output additional bits for EOBRUN
+        if nbits > 0 {
+            let mask = (1u16 << nbits) - 1;
+            let extra = (self.eobrun & mask) as u32;
+            self.writer.put_bits(extra, nbits)?;
+        }
+
+        self.eobrun = 0;
+
+        // Emit all buffered correction bits
+        for &bit in &self.correction_bits {
+            self.writer.put_bits(bit, 1)?;
+        }
+        self.correction_bits.clear();
 
         Ok(())
     }
@@ -665,10 +766,11 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
         Ok(())
     }
 
-    /// Finish the current scan, flushing any pending EOBRUN.
+    /// Finish the current scan, flushing any pending EOBRUN and correction bits.
     pub fn finish_scan(&mut self, ac_table: Option<&DerivedTable>) -> std::io::Result<()> {
         if let Some(table) = ac_table {
-            self.flush_eobrun(table)?;
+            // Use flush_eobrun_with_bits to ensure correction bits are emitted
+            self.flush_eobrun_with_bits(table)?;
         }
         self.writer.flush()?;
         Ok(())
@@ -794,45 +896,36 @@ impl ProgressiveSymbolCounter {
     /// In refinement scans:
     /// - Previously-coded coefficients just output correction bits (not Huffman-coded)
     /// - Newly non-zero coefficients use (run, 1) symbols (always category 1)
-    /// - ZRL (0xF0) for runs of 16+ zeros before a new non-zero
+    /// - ZRL (0xF0) for runs of 16 zeros
     /// - EOBn symbols for trailing zeros after last new non-zero
+    ///
+    /// # Arguments
+    /// * `block` - DCT coefficients in natural order
+    /// * `ss` - Spectral selection start (1..63)
+    /// * `se` - Spectral selection end (1..63)
+    /// * `ah` - Successive approximation high bit (previous Al)
+    /// * `al` - Successive approximation low bit (current precision)
+    /// * `ac_counter` - Frequency counter for AC symbols
     pub fn count_ac_refine(
         &mut self,
         block: &[i16; DCTSIZE2],
         ss: u8,
         se: u8,
+        ah: u8,
         al: u8,
         ac_counter: &mut FrequencyCounter,
     ) {
         let mut run = 0u32;
 
-        // Find last newly-non-zero coefficient in this band
-        // A coefficient is "newly non-zero" if (abs_coef >> al) == 1
-        let mut kex = se;
-        while kex >= ss {
-            let coef = block[JPEG_NATURAL_ORDER[kex as usize]];
-            let abs_coef = coef.unsigned_abs();
-            if (abs_coef >> al) == 1 {
-                // This is newly non-zero
-                break;
-            }
-            if (abs_coef >> al) > 1 {
-                // This was previously coded - still need to count its position
-                // as it affects the run length for new coefficients
-                break;
-            }
-            kex -= 1;
-        }
-
         for k in ss..=se {
             let coef = block[JPEG_NATURAL_ORDER[k as usize]];
             let abs_coef = coef.unsigned_abs();
 
+            // Check if previously coded (matches C mozjpeg's temp > 1 check)
             if (abs_coef >> al) > 1 {
                 // Previously coded - no Huffman symbol needed (just correction bit)
-                // But we need to track that it "exists" for run counting purposes
                 // Correction bits are sent raw, not Huffman coded
-                continue;
+                // Don't increment run - previously coded positions don't count as zeros
             } else if (abs_coef >> al) == 1 {
                 // Newly non-zero coefficient
                 // Flush any pending EOBRUN
@@ -854,6 +947,12 @@ impl ProgressiveSymbolCounter {
             } else {
                 // Zero coefficient - increment run
                 run += 1;
+
+                // Emit ZRL incrementally when run reaches 16
+                if run == 16 {
+                    ac_counter.count(0xF0); // ZRL
+                    run = 0;
+                }
             }
         }
 

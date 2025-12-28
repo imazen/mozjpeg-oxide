@@ -46,6 +46,7 @@ use crate::huffman::{DerivedTable, HuffTable};
 use crate::marker::MarkerWriter;
 use crate::progressive::{
     generate_baseline_scan, generate_minimal_progressive_scans,
+    generate_mozjpeg_max_compression_scans,
 };
 use crate::quant::{create_quant_tables, quantize_block};
 use crate::sample;
@@ -1005,7 +1006,9 @@ impl Encoder {
                     &ac_chroma_derived,
                 )?
             } else {
-                // Temporarily use minimal progressive to debug non-MCU aligned issue
+                // Use simple progressive scan script (matches C mozjpeg's jpeg_simple_progression)
+                // This is 4 scans: 1 DC + 1 AC per component
+                // For max compression, enable optimize_scans which tries multiple configurations
                 generate_minimal_progressive_scans(3)
             };
 

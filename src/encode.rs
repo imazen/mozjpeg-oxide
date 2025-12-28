@@ -48,6 +48,7 @@ use crate::progressive::{generate_baseline_scan, generate_minimal_progressive_sc
 use crate::quant::{create_quant_tables, quantize_block};
 use crate::sample;
 use crate::scan_optimize::{generate_search_scans, ScanSearchConfig, ScanSelector};
+use crate::scan_trial::ScanTrialEncoder;
 use crate::simd::SimdOps;
 use crate::trellis::{dc_trellis_optimize_indexed, trellis_quantize_block};
 use crate::types::{ComponentInfo, PixelDensity, Subsampling, TrellisConfig};
@@ -1754,9 +1755,13 @@ impl Encoder {
     ///
     /// This implements the optimize_scans feature from C mozjpeg:
     /// 1. Generate 64 individual candidate scans
-    /// 2. Trial-encode each scan to get its size
+    /// 2. Trial-encode scans SEQUENTIALLY to get accurate sizes
     /// 3. Use ScanSelector to find optimal Al levels and frequency splits
     /// 4. Build the final scan script from the selection
+    ///
+    /// IMPORTANT: Scans must be encoded sequentially (not independently) because
+    /// refinement scans (Ah > 0) need context from previous scans to produce
+    /// correct output sizes.
     #[allow(clippy::too_many_arguments)]
     fn optimize_progressive_scans(
         &self,
@@ -1780,70 +1785,15 @@ impl Encoder {
         let config = ScanSearchConfig::default();
         let candidate_scans = generate_search_scans(num_components, &config);
 
-        // Trial-encode each candidate scan to get its size
-        let mut scan_sizes = Vec::with_capacity(candidate_scans.len());
-
-        for scan in &candidate_scans {
-            let size = self.trial_encode_scan(
-                scan,
-                y_blocks,
-                cb_blocks,
-                cr_blocks,
-                mcu_rows,
-                mcu_cols,
-                h_samp,
-                v_samp,
-                actual_width,
-                actual_height,
-                chroma_width,
-                chroma_height,
-                dc_luma,
-                dc_chroma,
-                ac_luma,
-                ac_chroma,
-            )?;
-            scan_sizes.push(size);
-        }
-
-        // Use ScanSelector to find the optimal configuration
-        let selector = ScanSelector::new(num_components, config.clone());
-        let result = selector.select_best(&scan_sizes);
-
-        // Build the final scan script from the selection
-        Ok(result.build_final_scans(num_components, &config))
-    }
-
-    /// Trial-encode a single scan and return its size in bytes.
-    #[allow(clippy::too_many_arguments)]
-    fn trial_encode_scan(
-        &self,
-        scan: &crate::types::ScanInfo,
-        y_blocks: &[[i16; DCTSIZE2]],
-        cb_blocks: &[[i16; DCTSIZE2]],
-        cr_blocks: &[[i16; DCTSIZE2]],
-        mcu_rows: usize,
-        mcu_cols: usize,
-        h_samp: u8,
-        v_samp: u8,
-        actual_width: usize,
-        actual_height: usize,
-        chroma_width: usize,
-        chroma_height: usize,
-        dc_luma: &DerivedTable,
-        dc_chroma: &DerivedTable,
-        ac_luma: &DerivedTable,
-        ac_chroma: &DerivedTable,
-    ) -> Result<usize> {
-        let mut buffer = Vec::new();
-        let mut bit_writer = BitWriter::new(&mut buffer);
-        let mut prog_encoder = ProgressiveEncoder::new(&mut bit_writer);
-
-        // Encode the scan
-        self.encode_progressive_scan(
-            scan,
+        // Use ScanTrialEncoder for sequential trial encoding with proper state tracking
+        let mut trial_encoder = ScanTrialEncoder::new(
             y_blocks,
             cb_blocks,
             cr_blocks,
+            dc_luma,
+            dc_chroma,
+            ac_luma,
+            ac_chroma,
             mcu_rows,
             mcu_cols,
             h_samp,
@@ -1852,27 +1802,17 @@ impl Encoder {
             actual_height,
             chroma_width,
             chroma_height,
-            dc_luma,
-            dc_chroma,
-            ac_luma,
-            ac_chroma,
-            &mut prog_encoder,
-        )?;
+        );
 
-        // Finish the scan (flush any pending EOBRUN)
-        let ac_table = if scan.ss > 0 {
-            if scan.component_index[0] == 0 {
-                Some(ac_luma)
-            } else {
-                Some(ac_chroma)
-            }
-        } else {
-            None
-        };
-        prog_encoder.finish_scan(ac_table)?;
-        bit_writer.flush()?;
+        // Trial-encode all scans sequentially to get accurate sizes
+        let scan_sizes = trial_encoder.encode_all_scans(&candidate_scans)?;
 
-        Ok(buffer.len())
+        // Use ScanSelector to find the optimal configuration
+        let selector = ScanSelector::new(num_components, config.clone());
+        let result = selector.select_best(&scan_sizes);
+
+        // Build the final scan script from the selection
+        Ok(result.build_final_scans(num_components, &config))
     }
 
     /// Encode a single progressive scan.

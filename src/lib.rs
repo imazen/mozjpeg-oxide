@@ -188,6 +188,11 @@ pub mod sample;
 #[allow(dead_code)]
 pub mod scan_optimize;
 
+/// Sequential scan trial encoding (internal).
+#[doc(hidden)]
+#[allow(dead_code)]
+pub mod scan_trial;
+
 /// SIMD acceleration (internal).
 #[doc(hidden)]
 #[allow(dead_code)]

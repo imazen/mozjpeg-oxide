@@ -127,6 +127,43 @@ Rust produces files with quality matching C mozjpeg across all image sizes and s
 
 ### Known Issues / Active Investigations
 
+#### File Size Gap at High Quality (Q90+) - ROOT CAUSE IDENTIFIED
+
+**Symptom:** Rust produces ~5% larger files at Q97 compared to C mozjpeg.
+
+**Root Cause:** Different progressive scan scripts.
+
+C mozjpeg uses a 10-scan successive approximation script:
+1. DC scan (Ah=0, Al=1) - coarse DC bits
+2. Y: AC 1-5, Ah=0, Al=2
+3. Cr: AC 1-63, Ah=0, Al=1
+4. Cb: AC 1-63, Ah=0, Al=1
+5. Y: AC 6-63, Ah=0, Al=2
+6. Y: AC 1-63, Ah=2, Al=1 (refinement)
+7. DC refinement (Ah=1, Al=0)
+8-10. AC refinements for each component
+
+Rust uses a minimal 4-scan script:
+1. DC scan for all components (Ah=0, Al=0)
+2-4. Full AC (1-63) for Y, Cb, Cr (Ah=0, Al=0)
+
+**Why successive approximation helps:**
+- Splits coefficients into coarse (high) and fine (low) bits
+- Each bit layer has different statistical properties
+- Huffman encoding is more efficient on each layer separately
+- Result: Better compression at high quality where more bits matter
+
+**Investigation verified (Dec 2024):**
+- Trellis quantization matches C exactly (FFI test confirms 0 differences)
+- DC coefficient clamping fixed (was missing MAX_COEF_VAL=1023 check)
+- All other components match: DCT, color, downsampling, Huffman tables
+
+**Future work:** Implement successive approximation progressive script for better
+high-quality compression. This is a significant change requiring:
+- Progressive Huffman encoder modifications for Al/Ah handling
+- Coefficient bit-plane extraction
+- Multi-pass refinement encoding
+
 #### Rust vs C Pixel Difference - RESOLVED ✅
 
 Previously reported "max diff ~11" was due to comparing different encoding modes:
@@ -139,6 +176,7 @@ Previously reported "max diff ~11" was due to comparing different encoding modes
 |-----------|--------------|-------|
 | DCT | ✅ Exact | FFI test passes |
 | Quantization | ✅ Exact | FFI test passes |
+| Trellis | ✅ Exact | FFI test passes (new Dec 2024) |
 | Color conversion | ✅ ±1 | Rounding variance |
 | Downsampling | ✅ Exact | FFI test passes |
 | Quant tables | ✅ Identical | Verified in JPEG output |
@@ -147,13 +185,9 @@ Previously reported "max diff ~11" was due to comparing different encoding modes
 
 **Key findings:**
 - With truly identical settings (baseline + Huffman opt), **0 pixel difference**
-- Without Huffman optimization, C uses optimized tables even with `optimize_coding=0`
-- File size with Huffman opt: Rust within 5% of C (16 bytes = JFIF density field difference)
-
-**Remaining file size notes:**
-- Without Huffman optimization, Rust uses standard Annex K tables while C uses minimal tables
-- This causes ~40% size difference in non-optimized mode (not a bug, just different defaults)
-- Enable `optimize_huffman(true)` for best compression (default in Rust)
+- Trellis quantization produces identical coefficient decisions
+- DC clamping to 1023 now matches C behavior
+- File size gap at high quality due to progressive scan structure (see above)
 
 ## Workflow Rules
 

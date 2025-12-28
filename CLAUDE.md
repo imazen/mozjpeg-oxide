@@ -1,5 +1,33 @@
 # mozjpeg-oxide Development Guide
 
+## CRITICAL: Anti-Patterns to NEVER Repeat
+
+### DO NOT disable features to achieve parity
+
+**BANNED SOLUTIONS:**
+- Disabling `optimize_scans` in `max_compression()` to hide parity gaps
+- Changing defaults to avoid broken code paths
+- Commenting out features that don't work correctly
+
+**REQUIRED APPROACH:**
+1. If a feature produces wrong output, FIX THE FEATURE
+2. If SA encoding produces larger files, debug the SA encoder - don't disable SA
+3. If optimize_scans selects wrong scans, fix the trial encoder - don't disable it
+4. Document gaps honestly in README, but keep features enabled
+
+**Root cause of progressive parity gap:**
+- The 9-scan SA script in `generate_mozjpeg_max_compression_scans()` is CORRECT
+- The SA encoder (`encode_ac_first` with Al>0, refinement scans) needs verification
+- The trial encoder may not accurately estimate SA scan costs
+- FIX: Add FFI comparison test for SA encoding, not disable the feature
+
+### DO NOT relax test tolerances
+
+If tests fail, find and fix the bug. Never:
+- Increase allowed difference thresholds
+- Skip failing tests
+- Mark tests as `#[ignore]` to make CI green
+
 ## Project Overview
 
 Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology.

@@ -168,9 +168,8 @@ impl Encoder {
     /// Enables progressive mode, trellis quantization, Huffman optimization,
     /// and overshoot deringing.
     ///
-    /// Note: optimize_scans is disabled by default as the current implementation
-    /// can produce slightly larger files than simple progressive mode. Use
-    /// `.optimize_scans(true)` to enable it for experimental scan optimization.
+    /// Note: optimize_scans tries multiple scan configurations to find the smallest.
+    /// Results may differ from C mozjpeg's default 9-scan successive approximation script.
     pub fn max_compression() -> Self {
         Self {
             quality: 75,
@@ -183,7 +182,7 @@ impl Encoder {
             force_baseline: false,
             optimize_huffman: true,
             overshoot_deringing: true,
-            optimize_scans: false,
+            optimize_scans: true,
             restart_interval: 0,
             pixel_density: PixelDensity::default(),
             exif_data: None,
@@ -991,9 +990,8 @@ impl Encoder {
                     &ac_chroma_derived,
                 )?
             } else {
-                // Use simple progressive scan script (matches C mozjpeg's jpeg_simple_progression)
-                // This is 4 scans: 1 DC + 1 AC per component
-                // For max compression, enable optimize_scans which tries multiple configurations
+                // Use simple progressive scan script (4 scans: DC + full AC per component)
+                // TODO: Implement proper SA encoding to use generate_mozjpeg_max_compression_scans
                 generate_minimal_progressive_scans(3)
             };
 
@@ -2257,7 +2255,6 @@ mod tests {
         assert!(encoder.trellis.enabled);
         assert!(encoder.progressive);
         assert!(encoder.optimize_huffman);
-        // optimize_scans is disabled by default as it can produce larger files
-        assert!(!encoder.optimize_scans);
+        assert!(encoder.optimize_scans);
     }
 }

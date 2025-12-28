@@ -532,3 +532,384 @@ fn test_deringing_matches_c() {
 
     println!("All deringing comparison tests passed!");
 }
+
+/// Test that Rust trellis quantization matches C trellis quantization.
+///
+/// This is a critical test for file size parity - the trellis DP algorithm
+/// must produce identical decisions to C mozjpeg.
+#[test]
+fn test_trellis_matches_c() {
+    use mozjpeg_oxide::consts::{AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, STD_LUMINANCE_QUANT_TBL};
+    use mozjpeg_oxide::huffman::{DerivedTable, HuffTable};
+    use mozjpeg_oxide::trellis::trellis_quantize_block;
+    use mozjpeg_oxide::TrellisConfig;
+
+    // Build the AC Huffman table to get code sizes
+    let mut htbl = HuffTable::default();
+    htbl.bits.copy_from_slice(&AC_LUMINANCE_BITS);
+    for (i, &v) in AC_LUMINANCE_VALUES.iter().enumerate() {
+        htbl.huffval[i] = v;
+    }
+    let ac_table = DerivedTable::from_huff_table(&htbl, false).unwrap();
+
+    // Extract code sizes for C function
+    let mut ac_huffsi = [0i8; 256];
+    for i in 0..256 {
+        let (_, size) = ac_table.get_code(i as u8);
+        ac_huffsi[i] = size as i8;
+    }
+
+    // Use standard luminance quantization table at Q75
+    let qtbl = STD_LUMINANCE_QUANT_TBL[0];
+
+    // Default trellis config
+    let config = TrellisConfig::default();
+
+    // Test with various input patterns
+    let test_patterns: Vec<[i16; 64]> = vec![
+        // Pattern 1: Moderate coefficients
+        {
+            let mut arr = [0i16; 64];
+            arr[0] = 1000; // DC
+            arr[1] = 200;
+            arr[8] = 150;
+            arr[2] = 100;
+            arr[9] = 80;
+            arr[16] = 50;
+            arr
+        },
+        // Pattern 2: High DC, sparse AC
+        {
+            let mut arr = [0i16; 64];
+            arr[0] = 2000;
+            arr[1] = 50;
+            arr[8] = 30;
+            arr
+        },
+        // Pattern 3: Gradient-like pattern
+        {
+            let mut arr = [0i16; 64];
+            for i in 0..64 {
+                arr[i] = (1000 - i as i16 * 15).max(0);
+            }
+            arr
+        },
+        // Pattern 4: Negative coefficients
+        {
+            let mut arr = [0i16; 64];
+            arr[0] = 800;
+            arr[1] = -150;
+            arr[8] = 100;
+            arr[2] = -75;
+            arr
+        },
+        // Pattern 5: Large coefficients (high detail)
+        {
+            let mut arr = [0i16; 64];
+            arr[0] = 3000;
+            arr[1] = 500;
+            arr[8] = 400;
+            arr[2] = 350;
+            arr[9] = 300;
+            arr[16] = 250;
+            arr[3] = 200;
+            arr[10] = 180;
+            arr[17] = 160;
+            arr[24] = 140;
+            arr
+        },
+    ];
+
+    let mut total_diffs = 0;
+    let mut total_coeffs = 0;
+
+    for (pattern_idx, pattern) in test_patterns.iter().enumerate() {
+        // Scale input by 8 to match raw DCT format (DCT output is scaled by 8)
+        let mut src = [0i32; 64];
+        for i in 0..64 {
+            src[i] = pattern[i] as i32 * 8;
+        }
+
+        // Rust trellis
+        let mut rust_quantized = [0i16; 64];
+        trellis_quantize_block(&src, &mut rust_quantized, &qtbl, &ac_table, &config);
+
+        // C trellis (needs i16 input matching JCOEF type)
+        let mut c_src = [0i16; 64];
+        for i in 0..64 {
+            c_src[i] = (src[i] / 8) as i16; // C expects pre-divided values? Let's check
+        }
+
+        // Actually the C test export expects the same scaled format
+        let mut c_src_scaled = [0i16; 64];
+        for i in 0..64 {
+            c_src_scaled[i] = src[i] as i16; // Scaled by 8
+        }
+
+        let mut c_quantized = [0i16; 64];
+        unsafe {
+            ffi::mozjpeg_test_trellis_quantize_block(
+                c_src_scaled.as_ptr(),
+                c_quantized.as_mut_ptr(),
+                qtbl.as_ptr(),
+                ac_huffsi.as_ptr(),
+                config.lambda_log_scale1,
+                config.lambda_log_scale2,
+            );
+        }
+
+        // Compare results
+        let mut pattern_diffs = 0;
+        for i in 0..64 {
+            if rust_quantized[i] != c_quantized[i] {
+                pattern_diffs += 1;
+                println!(
+                    "Pattern {} coef {}: Rust={}, C={}",
+                    pattern_idx, i, rust_quantized[i], c_quantized[i]
+                );
+            }
+        }
+
+        total_diffs += pattern_diffs;
+        total_coeffs += 64;
+
+        if pattern_diffs > 0 {
+            println!(
+                "Pattern {} had {} differences out of 64 coefficients",
+                pattern_idx, pattern_diffs
+            );
+            println!("  Rust: {:?}", &rust_quantized[..16]);
+            println!("  C:    {:?}", &c_quantized[..16]);
+        }
+    }
+
+    println!(
+        "\nTrellis comparison: {} differences out of {} total coefficients",
+        total_diffs, total_coeffs
+    );
+
+    assert_eq!(
+        total_diffs, 0,
+        "Trellis quantization should produce identical results to C mozjpeg"
+    );
+}
+
+/// Test trellis with random-ish realistic DCT coefficients.
+///
+/// Uses pseudo-random values that mimic actual DCT output patterns.
+#[test]
+fn test_trellis_matches_c_random() {
+    use mozjpeg_oxide::consts::{AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, STD_LUMINANCE_QUANT_TBL};
+    use mozjpeg_oxide::huffman::{DerivedTable, HuffTable};
+    use mozjpeg_oxide::trellis::trellis_quantize_block;
+    use mozjpeg_oxide::TrellisConfig;
+
+    // Build AC Huffman table
+    let mut htbl = HuffTable::default();
+    htbl.bits.copy_from_slice(&AC_LUMINANCE_BITS);
+    for (i, &v) in AC_LUMINANCE_VALUES.iter().enumerate() {
+        htbl.huffval[i] = v;
+    }
+    let ac_table = DerivedTable::from_huff_table(&htbl, false).unwrap();
+
+    // Extract code sizes
+    let mut ac_huffsi = [0i8; 256];
+    for i in 0..256 {
+        let (_, size) = ac_table.get_code(i as u8);
+        ac_huffsi[i] = size as i8;
+    }
+
+    let qtbl = STD_LUMINANCE_QUANT_TBL[0];
+    let config = TrellisConfig::default();
+
+    let mut total_diffs = 0;
+    let mut total_coeffs = 0;
+
+    // Test with many pseudo-random patterns
+    for seed in 0..50 {
+        // Generate pseudo-random DCT-like coefficients
+        // DC is large, AC coefficients decay with frequency (typical of natural images)
+        // Note: Values must fit in i16 after scaling by 8, so max raw value is ~4000
+        let mut pattern = [0i16; 64];
+        pattern[0] = 500 + (seed * 20) as i16; // DC coefficient (max ~1500)
+
+        for i in 1..64 {
+            // Coefficients decay with frequency position
+            // Add some randomness
+            let freq_factor = 1.0 / (1.0 + (i as f32).sqrt());
+            let random_part = ((seed * 7 + i * 13 + i * i) % 256) as i16 - 128;
+            pattern[i] = ((random_part as f32 * freq_factor * 2.0) as i16).clamp(-1000, 1000);
+        }
+
+        // Scale by 8 for raw DCT format (matches how DCT output is scaled)
+        // Values must fit in i16 for FFI call
+        let mut src = [0i32; 64];
+        for i in 0..64 {
+            src[i] = pattern[i] as i32 * 8;
+        }
+
+        // Verify no overflow when converting to i16
+        for i in 0..64 {
+            assert!(src[i] >= -32768 && src[i] <= 32767,
+                "src[{}] = {} overflows i16", i, src[i]);
+        }
+
+        // Rust trellis
+        let mut rust_quantized = [0i16; 64];
+        trellis_quantize_block(&src, &mut rust_quantized, &qtbl, &ac_table, &config);
+
+        // C trellis
+        let mut c_src_scaled = [0i16; 64];
+        for i in 0..64 {
+            c_src_scaled[i] = src[i] as i16;
+        }
+
+        let mut c_quantized = [0i16; 64];
+        unsafe {
+            ffi::mozjpeg_test_trellis_quantize_block(
+                c_src_scaled.as_ptr(),
+                c_quantized.as_mut_ptr(),
+                qtbl.as_ptr(),
+                ac_huffsi.as_ptr(),
+                config.lambda_log_scale1,
+                config.lambda_log_scale2,
+            );
+        }
+
+        // Compare
+        let mut pattern_diffs = 0;
+        for i in 0..64 {
+            if rust_quantized[i] != c_quantized[i] {
+                pattern_diffs += 1;
+                if pattern_diffs <= 5 {
+                    println!(
+                        "Seed {} coef {}: Rust={}, C={}",
+                        seed, i, rust_quantized[i], c_quantized[i]
+                    );
+                }
+            }
+        }
+
+        total_diffs += pattern_diffs;
+        total_coeffs += 64;
+    }
+
+    println!(
+        "\nRandom trellis comparison: {} differences out of {} coefficients",
+        total_diffs, total_coeffs
+    );
+
+    assert_eq!(
+        total_diffs, 0,
+        "Random trellis test: expected 0 differences"
+    );
+}
+
+/// Test trellis at different quality levels (which affects quantization tables).
+#[test]
+fn test_trellis_matches_c_quality_levels() {
+    use mozjpeg_oxide::consts::{AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, STD_LUMINANCE_QUANT_TBL};
+    use mozjpeg_oxide::huffman::{DerivedTable, HuffTable};
+    use mozjpeg_oxide::quant::quality_to_scale_factor;
+    use mozjpeg_oxide::trellis::trellis_quantize_block;
+    use mozjpeg_oxide::TrellisConfig;
+
+    // Build AC Huffman table
+    let mut htbl = HuffTable::default();
+    htbl.bits.copy_from_slice(&AC_LUMINANCE_BITS);
+    for (i, &v) in AC_LUMINANCE_VALUES.iter().enumerate() {
+        htbl.huffval[i] = v;
+    }
+    let ac_table = DerivedTable::from_huff_table(&htbl, false).unwrap();
+
+    let mut ac_huffsi = [0i8; 256];
+    for i in 0..256 {
+        let (_, size) = ac_table.get_code(i as u8);
+        ac_huffsi[i] = size as i8;
+    }
+
+    let config = TrellisConfig::default();
+
+    // Test quality levels that are of interest (especially high qualities where the gap was observed)
+    let quality_levels = [50, 75, 85, 90, 95, 97];
+
+    for quality in quality_levels {
+        let scale_factor = quality_to_scale_factor(quality);
+
+        // Scale the standard quantization table by quality
+        let mut qtbl = [0u16; 64];
+        for i in 0..64 {
+            let val = (STD_LUMINANCE_QUANT_TBL[0][i] as u32 * scale_factor as u32 + 50) / 100;
+            qtbl[i] = val.clamp(1, 255) as u16;
+        }
+
+        let mut total_diffs = 0;
+
+        // Test with 20 patterns per quality level
+        // Values must fit in i16 after scaling by 8
+        for seed in 0..20 {
+            let mut pattern = [0i16; 64];
+            pattern[0] = 800 + (seed * 30) as i16; // max 800+570=1370, *8=10960, fits in i16
+
+            for i in 1..64 {
+                let freq_factor = 1.0 / (1.0 + (i as f32).sqrt());
+                let random_part = ((seed * 11 + i * 17) % 200) as i16 - 100;
+                pattern[i] = ((random_part as f32 * freq_factor * 2.0) as i16).clamp(-500, 500);
+            }
+
+            let mut src = [0i32; 64];
+            for i in 0..64 {
+                src[i] = pattern[i] as i32 * 8;
+            }
+
+            // Verify no overflow
+            for i in 0..64 {
+                assert!(src[i] >= -32768 && src[i] <= 32767,
+                    "Q{} seed {} src[{}] = {} overflows i16", quality, seed, i, src[i]);
+            }
+
+            let mut rust_quantized = [0i16; 64];
+            trellis_quantize_block(&src, &mut rust_quantized, &qtbl, &ac_table, &config);
+
+            let mut c_src_scaled = [0i16; 64];
+            for i in 0..64 {
+                c_src_scaled[i] = src[i] as i16;
+            }
+
+            let mut c_quantized = [0i16; 64];
+            unsafe {
+                ffi::mozjpeg_test_trellis_quantize_block(
+                    c_src_scaled.as_ptr(),
+                    c_quantized.as_mut_ptr(),
+                    qtbl.as_ptr(),
+                    ac_huffsi.as_ptr(),
+                    config.lambda_log_scale1,
+                    config.lambda_log_scale2,
+                );
+            }
+
+            for i in 0..64 {
+                if rust_quantized[i] != c_quantized[i] {
+                    total_diffs += 1;
+                    if total_diffs <= 5 {
+                        println!(
+                            "  Q{} seed {} coef {}: Rust={}, C={}, qtbl[{}]={}",
+                            quality, seed, i, rust_quantized[i], c_quantized[i], i, qtbl[i]
+                        );
+                    }
+                }
+            }
+        }
+
+        println!("Q{}: {} differences", quality, total_diffs);
+        if total_diffs > 0 {
+            println!("  Q{} DC quant value: {}", quality, qtbl[0]);
+            println!("  Lambda: scale1={}, scale2={}", config.lambda_log_scale1, config.lambda_log_scale2);
+        }
+        assert_eq!(
+            total_diffs, 0,
+            "Q{} trellis should match C exactly",
+            quality
+        );
+    }
+}

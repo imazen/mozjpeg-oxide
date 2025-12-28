@@ -210,6 +210,22 @@ extern "C" {
     /// data: 64 level-shifted samples (-128 to +127)
     /// dc_quant: DC quantization value (used to limit overshoot)
     pub fn mozjpeg_test_preprocess_deringing(data: *mut DCTELEM, dc_quant: UINT16);
+
+    /// Trellis quantization on a single 8x8 block
+    /// src: Raw DCT coefficients (64 values, scaled by 8)
+    /// quantized: Output quantized coefficients (64 values)
+    /// qtbl: Quantization table (64 values)
+    /// ac_huffsi: AC Huffman code sizes (256 values)
+    /// lambda_log_scale1: Lambda scale parameter 1 (default: 14.75)
+    /// lambda_log_scale2: Lambda scale parameter 2 (default: 16.5)
+    pub fn mozjpeg_test_trellis_quantize_block(
+        src: *const JCOEF,
+        quantized: *mut JCOEF,
+        qtbl: *const UINT16,
+        ac_huffsi: *const libc::c_char,
+        lambda_log_scale1: libc::c_float,
+        lambda_log_scale2: libc::c_float,
+    );
 }
 
 // Version constant for jpeg_CreateCompress

@@ -70,11 +70,13 @@ pub fn trellis_quantize_block(
     let mut run_start = [0usize; DCTSIZE2];
 
     // Quantize DC coefficient (simple rounding - DC trellis is optional)
+    // max_coef_bits = data_precision + 2 = 8 + 2 = 10 for 8-bit JPEG
+    const MAX_COEF_VAL: i32 = (1 << 10) - 1; // 1023
     {
         let x = src[0].abs();
         let sign = if src[0] < 0 { -1i16 } else { 1i16 };
         let q = 8 * qtable[0] as i32;
-        let qval = (x + q / 2) / q;
+        let qval = ((x + q / 2) / q).min(MAX_COEF_VAL);
         quantized[0] = (qval as i16) * sign;
     }
 
@@ -272,11 +274,13 @@ pub fn trellis_quantize_block_with_eob_info(
     let mut run_start = [0usize; DCTSIZE2];
 
     // Quantize DC coefficient (simple rounding)
+    // max_coef_bits = data_precision + 2 = 8 + 2 = 10 for 8-bit JPEG
+    const MAX_COEF_VAL: i32 = (1 << 10) - 1; // 1023
     {
         let x = src[0].abs();
         let sign = if src[0] < 0 { -1i16 } else { 1i16 };
         let q = 8 * qtable[0] as i32;
-        let qval = (x + q / 2) / q;
+        let qval = ((x + q / 2) / q).min(MAX_COEF_VAL);
         quantized[0] = (qval as i16) * sign;
     }
 
@@ -838,11 +842,14 @@ pub fn simple_quantize_block(
     quantized: &mut [i16; DCTSIZE2],
     qtable: &[u16; DCTSIZE2],
 ) {
+    // max_coef_bits = data_precision + 2 = 8 + 2 = 10 for 8-bit JPEG
+    const MAX_COEF_VAL: i32 = (1 << 10) - 1; // 1023
     for i in 0..DCTSIZE2 {
         let x = src[i];
         let q = 8 * qtable[i] as i32;
         let sign = if x < 0 { -1 } else { 1 };
-        quantized[i] = (sign * ((x.abs() + q / 2) / q)) as i16;
+        let qval = ((x.abs() + q / 2) / q).min(MAX_COEF_VAL);
+        quantized[i] = (sign * qval) as i16;
     }
 }
 

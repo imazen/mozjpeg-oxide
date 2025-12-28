@@ -41,7 +41,7 @@ use crate::huffman::DerivedTable;
 use crate::huffman::FrequencyCounter;
 use crate::marker::MarkerWriter;
 use crate::progressive::{generate_baseline_scan, generate_minimal_progressive_scans};
-use crate::quant::{create_quant_tables, quantize_block};
+use crate::quant::{create_quant_tables, quantize_block_raw};
 use crate::sample;
 use crate::scan_optimize::{generate_search_scans, ScanSearchConfig, ScanSelector};
 use crate::scan_trial::ScanTrialEncoder;
@@ -1555,15 +1555,13 @@ impl Encoder {
         }
 
         // Use trellis quantization if enabled
-        // Trellis expects raw DCT (scaled by 8) and handles the scaling internally
+        // Both paths expect raw DCT (scaled by 8) and handle the scaling internally
         if self.trellis.enabled {
             trellis_quantize_block(&dct_i32, quant_block, qtable, ac_table, &self.trellis);
         } else {
-            // Non-trellis path: descale first, then quantize
-            for coeff in dct_i32.iter_mut() {
-                *coeff = (*coeff + 4) >> 3;
-            }
-            quantize_block(&dct_i32, qtable, quant_block);
+            // Non-trellis path: use single-step quantization matching C mozjpeg
+            // This takes raw DCT (scaled by 8) and uses q_scaled = 8 * qtable[i]
+            quantize_block_raw(&dct_i32, qtable, quant_block);
         }
 
         // Entropy encode
@@ -1717,15 +1715,13 @@ impl Encoder {
         }
 
         // Use trellis quantization if enabled
-        // Trellis expects raw DCT (scaled by 8) and handles the scaling internally
+        // Both paths expect raw DCT (scaled by 8) and handle the scaling internally
         if self.trellis.enabled {
             trellis_quantize_block(&dct_i32, out_block, qtable, ac_table, &self.trellis);
         } else {
-            // Non-trellis path: descale first, then quantize
-            for coeff in dct_i32.iter_mut() {
-                *coeff = (*coeff + 4) >> 3;
-            }
-            quantize_block(&dct_i32, qtable, out_block);
+            // Non-trellis path: use single-step quantization matching C mozjpeg
+            // This takes raw DCT (scaled by 8) and uses q_scaled = 8 * qtable[i]
+            quantize_block_raw(&dct_i32, qtable, out_block);
         }
 
         Ok(())

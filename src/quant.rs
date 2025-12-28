@@ -162,6 +162,46 @@ pub fn quantize_block(
     }
 }
 
+/// Quantize a full 8x8 block of raw DCT coefficients (scaled by 8).
+///
+/// This function matches C mozjpeg's non-trellis quantization approach:
+/// - Takes raw DCT output (scaled by 8, NOT descaled)
+/// - Uses scaled quantization: q_scaled = 8 * quant_table[i]
+/// - Single rounding step: (abs(coef) + q_scaled/2) / q_scaled
+///
+/// This avoids the rounding differences that occur when descaling and
+/// quantizing are done as separate steps.
+///
+/// # Arguments
+/// * `coeffs` - Raw DCT coefficients scaled by 8 (64 values)
+/// * `quant_table` - Quantization table (64 values)
+/// * `output` - Output quantized coefficients (64 values)
+pub fn quantize_block_raw(
+    coeffs: &[i32; DCTSIZE2],
+    quant_table: &[u16; DCTSIZE2],
+    output: &mut [i16; DCTSIZE2],
+) {
+    // max_coef_bits = data_precision + 2 = 8 + 2 = 10 for 8-bit JPEG
+    const MAX_COEF_VAL: i32 = (1 << 10) - 1; // 1023
+
+    for i in 0..DCTSIZE2 {
+        let coef = coeffs[i];
+        // Scaled quantization value (includes DCT scale factor of 8)
+        let q = 8 * quant_table[i] as i32;
+
+        // Single-step quantization with rounding
+        let (abs_coef, sign) = if coef < 0 {
+            (-coef, -1i16)
+        } else {
+            (coef, 1i16)
+        };
+
+        // Round to nearest and clamp to valid range
+        let qval = ((abs_coef + q / 2) / q).min(MAX_COEF_VAL);
+        output[i] = (qval as i16) * sign;
+    }
+}
+
 /// Dequantize a full 8x8 block of coefficients.
 ///
 /// # Arguments

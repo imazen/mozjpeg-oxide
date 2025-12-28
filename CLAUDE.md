@@ -27,6 +27,7 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
 
 **Key findings:**
 - **With trellis enabled (default): Rust is within ±0.5% of C mozjpeg**
+- **Without trellis: Rust is within ±0.01% of C mozjpeg** (essentially identical)
 - Rust often produces **smaller** files than C mozjpeg at Q50-Q95
 - Trellis effect: Rust saves 15.7% vs C's 12.9% on typical images
 - Visual quality is equivalent (verified via SSIMULACRA2 and Butteraugli)

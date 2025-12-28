@@ -121,6 +121,57 @@ pub fn generate_standard_progressive_scans(num_components: u8) -> Vec<ScanInfo> 
     scans
 }
 
+/// Generate C mozjpeg's JCP_MAX_COMPRESSION progressive scan script.
+///
+/// This exactly matches the 9-scan script from jcparam.c lines 931-958.
+/// Uses successive approximation for luma only, with band splits at 8.
+///
+/// Script (9 scans for YCbCr):
+/// 1. DC all components (al=0)
+/// 2. Y 1-8 (al=2)
+/// 3. Cb 1-8 (al=0)
+/// 4. Cr 1-8 (al=0)
+/// 5. Y 9-63 (al=2)
+/// 6. Y refine 1-63 (ah=2, al=1)
+/// 7. Y refine 1-63 (ah=1, al=0)
+/// 8. Cb 9-63 (al=0)
+/// 9. Cr 9-63 (al=0)
+pub fn generate_mozjpeg_max_compression_scans(num_components: u8) -> Vec<ScanInfo> {
+    let mut scans = Vec::new();
+
+    if num_components == 1 {
+        // Grayscale: 5 scans
+        scans.push(ScanInfo::dc_scan(1));
+        scans.push(ScanInfo::ac_scan(0, 1, 8, 0, 2));
+        scans.push(ScanInfo::ac_scan(0, 9, 63, 0, 2));
+        scans.push(ScanInfo::ac_scan(0, 1, 63, 2, 1));
+        scans.push(ScanInfo::ac_scan(0, 1, 63, 1, 0));
+    } else {
+        // YCbCr: 9 scans (matching C mozjpeg JCP_MAX_COMPRESSION)
+
+        // DC scan for all components (al=0, no point transform)
+        scans.push(ScanInfo::dc_scan(num_components));
+
+        // Low frequency AC scans
+        scans.push(ScanInfo::ac_scan(0, 1, 8, 0, 2)); // Y 1-8 at Al=2
+        scans.push(ScanInfo::ac_scan(1, 1, 8, 0, 0)); // Cb 1-8 at Al=0
+        scans.push(ScanInfo::ac_scan(2, 1, 8, 0, 0)); // Cr 1-8 at Al=0
+
+        // Complete spectral selection for luma
+        scans.push(ScanInfo::ac_scan(0, 9, 63, 0, 2)); // Y 9-63 at Al=2
+
+        // Luma successive approximation refinement
+        scans.push(ScanInfo::ac_scan(0, 1, 63, 2, 1)); // Y refine 2->1
+        scans.push(ScanInfo::ac_scan(0, 1, 63, 1, 0)); // Y refine 1->0
+
+        // Complete spectral selection for chroma
+        scans.push(ScanInfo::ac_scan(1, 9, 63, 0, 0)); // Cb 9-63 at Al=0
+        scans.push(ScanInfo::ac_scan(2, 9, 63, 0, 0)); // Cr 9-63 at Al=0
+    }
+
+    scans
+}
+
 /// Generate mozjpeg-optimized progressive scan script.
 ///
 /// This is the scan script used when optimize_scans is enabled in mozjpeg.

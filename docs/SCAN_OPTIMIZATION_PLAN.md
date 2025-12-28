@@ -3,10 +3,29 @@
 ## Executive Summary
 
 Current state (Dec 2024):
-- Q50-Q85: Within 0.6% of C mozjpeg (Rust can be smaller at Q50!)
-- Q90-Q97: 1.7-4.8% larger than C mozjpeg
+- Q50-Q85: Within 2-3% of C mozjpeg with minimal progressive scans (4 scans, no SA)
+- Q90-Q97: 4-6% larger than C mozjpeg with optimize_scans enabled
 
-Root cause: Cost calculation method differs - we use full 1-63 scans while C uses band-split scans.
+### Key Finding: Successive Approximation Encoding Bug
+
+When using the 9-scan JCP_MAX_COMPRESSION script (with successive approximation for luma),
+Rust produces files **~28% larger** than C mozjpeg with identical scan scripts.
+
+**Root cause under investigation:**
+- `count_ac_refine` function was added for proper Huffman frequency counting
+- `encode_ac_refine` function exists but may have encoding bugs
+- The regression persists even with matching scan scripts
+
+**Workaround:** Using minimal progressive scans (4 scans, no SA) produces files within
+~2% of C mozjpeg. This is the current default.
+
+---
+
+## Historical Context (Dec 2024)
+
+Root cause analysis identified two issues:
+1. Cost calculation method differs - we use full 1-63 scans while C uses band-split scans
+2. **Successive approximation encoding is broken** - ~28% size regression when enabled
 
 ---
 

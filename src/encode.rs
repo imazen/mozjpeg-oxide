@@ -1003,9 +1003,16 @@ impl Encoder {
                     &ac_chroma_derived,
                 )?
             } else {
-                // Use minimal progressive (no successive approximation) for simpler encoding
-                // This matches C mozjpeg's jpeg_simple_progression()
-                // Successive approximation is only beneficial at high quality with optimize_scans
+                // Use minimal progressive scans (4 scans, no successive approximation)
+                //
+                // TODO: The 9-scan JCP_MAX_COMPRESSION script with successive
+                // approximation has a ~28% size regression. This is due to a bug in
+                // the refinement scan encoding or Huffman optimization. Investigation
+                // shows that even with identical scan scripts to C mozjpeg, Rust
+                // produces ~28% larger files with SA enabled.
+                //
+                // The count_ac_refine function was added but doesn't fully fix the
+                // issue. The refinement encoder (encode_ac_refine) may have bugs.
                 generate_minimal_progressive_scans(3)
             };
 
@@ -2177,13 +2184,18 @@ impl Encoder {
         };
 
         let mut counter = ProgressiveSymbolCounter::new();
+        let is_refinement = scan.ah != 0;
 
         if blocks_per_mcu == 1 {
             // Chroma or 4:4:4 Y: storage order = raster order
             // Only count actual_block_rows × actual_block_cols blocks
             let total_actual = actual_block_rows * actual_block_cols;
             for block in blocks.iter().take(total_actual) {
-                counter.count_ac_first(block, scan.ss, scan.se, scan.al, ac_freq);
+                if is_refinement {
+                    counter.count_ac_refine(block, scan.ss, scan.se, scan.al, ac_freq);
+                } else {
+                    counter.count_ac_first(block, scan.ss, scan.se, scan.al, ac_freq);
+                }
             }
         } else {
             // Y component with subsampling - iterate in raster order (matching encode_ac_scan)
@@ -2203,13 +2215,23 @@ impl Encoder {
                         + v_idx * h
                         + h_idx;
 
-                    counter.count_ac_first(
-                        &blocks[storage_idx],
-                        scan.ss,
-                        scan.se,
-                        scan.al,
-                        ac_freq,
-                    );
+                    if is_refinement {
+                        counter.count_ac_refine(
+                            &blocks[storage_idx],
+                            scan.ss,
+                            scan.se,
+                            scan.al,
+                            ac_freq,
+                        );
+                    } else {
+                        counter.count_ac_first(
+                            &blocks[storage_idx],
+                            scan.ss,
+                            scan.se,
+                            scan.al,
+                            ac_freq,
+                        );
+                    }
                 }
             }
         }

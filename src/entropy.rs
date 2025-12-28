@@ -789,6 +789,83 @@ impl ProgressiveSymbolCounter {
         }
     }
 
+    /// Count AC symbols for a refinement scan (Ah != 0).
+    ///
+    /// In refinement scans:
+    /// - Previously-coded coefficients just output correction bits (not Huffman-coded)
+    /// - Newly non-zero coefficients use (run, 1) symbols (always category 1)
+    /// - ZRL (0xF0) for runs of 16+ zeros before a new non-zero
+    /// - EOBn symbols for trailing zeros after last new non-zero
+    pub fn count_ac_refine(
+        &mut self,
+        block: &[i16; DCTSIZE2],
+        ss: u8,
+        se: u8,
+        al: u8,
+        ac_counter: &mut FrequencyCounter,
+    ) {
+        let mut run = 0u32;
+
+        // Find last newly-non-zero coefficient in this band
+        // A coefficient is "newly non-zero" if (abs_coef >> al) == 1
+        let mut kex = se;
+        while kex >= ss {
+            let coef = block[JPEG_NATURAL_ORDER[kex as usize]];
+            let abs_coef = coef.unsigned_abs();
+            if (abs_coef >> al) == 1 {
+                // This is newly non-zero
+                break;
+            }
+            if (abs_coef >> al) > 1 {
+                // This was previously coded - still need to count its position
+                // as it affects the run length for new coefficients
+                break;
+            }
+            kex -= 1;
+        }
+
+        for k in ss..=se {
+            let coef = block[JPEG_NATURAL_ORDER[k as usize]];
+            let abs_coef = coef.unsigned_abs();
+
+            if (abs_coef >> al) > 1 {
+                // Previously coded - no Huffman symbol needed (just correction bit)
+                // But we need to track that it "exists" for run counting purposes
+                // Correction bits are sent raw, not Huffman coded
+                continue;
+            } else if (abs_coef >> al) == 1 {
+                // Newly non-zero coefficient
+                // Flush any pending EOBRUN
+                if self.eobrun > 0 {
+                    self.flush_eobrun_count(ac_counter);
+                }
+
+                // Count ZRL for runs of 16+ zeros
+                while run >= 16 {
+                    ac_counter.count(0xF0); // ZRL
+                    run -= 16;
+                }
+
+                // Symbol = (run << 4) | 1 (always category 1 for refinement)
+                let symbol = ((run as u8) << 4) | 1;
+                ac_counter.count(symbol);
+
+                run = 0;
+            } else {
+                // Zero coefficient - increment run
+                run += 1;
+            }
+        }
+
+        // Handle remaining run (EOB)
+        if run > 0 {
+            self.eobrun += 1;
+            if self.eobrun == 0x7FFF {
+                self.flush_eobrun_count(ac_counter);
+            }
+        }
+    }
+
     /// Flush and count the EOBRUN symbol.
     fn flush_eobrun_count(&mut self, ac_counter: &mut FrequencyCounter) {
         if self.eobrun == 0 {

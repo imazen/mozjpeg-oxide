@@ -358,6 +358,10 @@ fn encode_c(rgb: &[u8], width: u32, height: u32, quality: u8) -> Vec<u8> {
 
         jpeg_set_defaults(&mut cinfo);
 
+        // Use ImageMagick quant tables (index 3) to match Rust encoder defaults
+        // Must be set BEFORE jpeg_set_quality which uses this index
+        jpeg_c_set_int_param(&mut cinfo, JINT_BASE_QUANT_TBL_IDX, 3);
+
         // Use JCP_MAX_COMPRESSION equivalent settings
         jpeg_simple_progression(&mut cinfo);
         jpeg_set_quality(&mut cinfo, quality as i32, 1);

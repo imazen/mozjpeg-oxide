@@ -14,19 +14,24 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
 
 ### Compression Results vs C mozjpeg
 
-**With matching settings (progressive + trellis + Huffman opt):**
+**Kodak corpus benchmark (24 images, progressive + trellis + Huffman opt):**
 
-| Mode | Rust | C mozjpeg | Ratio | Notes |
-|------|------|-----------|-------|-------|
-| Progressive + Trellis | 71,176 bytes | 72,721 bytes | **0.98x** | Rust is 2.1% smaller! |
-| Baseline + Trellis | 73,834 bytes | 72,721 bytes | 1.02x | C defaults to progressive |
+| Quality | Rust BPP | C BPP | Size Δ | Notes |
+|---------|----------|-------|--------|-------|
+| Q50 | 0.654 | 0.654 | **-0.02%** | Near-identical |
+| Q75 | 1.077 | 1.068 | +0.88% | Slight gap |
+| Q85 | 1.519 | 1.492 | +1.80% | Gap grows with quality |
+| Q97 | 3.772 | 3.580 | +5.36% | Trellis decisions differ |
 
-**Small test images (16x16):**
-| Quality | Rust Size | C Size | Ratio | Rust PSNR | C PSNR |
-|---------|-----------|--------|-------|-----------|--------|
-| Q50 | 491 bytes | 498 bytes | **0.99x** | 40.33 dB | 40.16 dB |
-| Q75 | 518 bytes | 558 bytes | **0.93x** | 44.90 dB | 45.20 dB |
-| Q85 | 590 bytes | 631 bytes | **0.94x** | 47.32 dB | 47.49 dB |
+**Quality metrics at Q97 are nearly identical:**
+- SSIMULACRA2: Rust slightly higher (+0.024 average)
+- Butteraugli: Both ~1.48 (imperceptible difference)
+
+**Key findings:**
+- At Q50 and below: Rust and C produce nearly identical file sizes
+- At high quality (Q75+): Rust produces ~1-5% larger files
+- Visual quality is equivalent or slightly better in Rust
+- The gap appears to be in trellis quantization rate-distortion decisions
 
 **Note:** C mozjpeg uses JCP_MAX_COMPRESSION profile by default which enables progressive
 mode. Use `Encoder::max_compression()` for equivalent behavior.

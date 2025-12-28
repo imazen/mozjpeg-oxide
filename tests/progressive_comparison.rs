@@ -42,8 +42,8 @@ struct ComparisonResult {
 fn load_test_image() -> Option<(Vec<u8>, u32, u32)> {
     // Try various test image locations
     let paths = [
-        "corpus/kodak/10.png",      // First available Kodak image
-        "tests/images/1.png",       // Available test image
+        "corpus/kodak/10.png", // First available Kodak image
+        "tests/images/1.png",  // Available test image
         "tests/images/kodim23.png",
         "corpus/kodak/kodim23.png",
     ];
@@ -337,10 +337,16 @@ fn test_successive_approximation_scan_structure() {
     }
 
     // Verify structure
-    assert!(scans.len() >= 10, "Standard progressive should have at least 10 scans");
+    assert!(
+        scans.len() >= 10,
+        "Standard progressive should have at least 10 scans"
+    );
 
     // First scan should be DC with point transform (Al > 0)
-    assert!(scans[0].ss == 0 && scans[0].se == 0, "First scan should be DC");
+    assert!(
+        scans[0].ss == 0 && scans[0].se == 0,
+        "First scan should be DC"
+    );
     assert!(scans[0].al > 0, "First DC scan should have point transform");
 
     // Should have refinement scans (Ah > 0)
@@ -414,7 +420,10 @@ fn test_compare_scan_scripts() {
     let minimal_refinements = minimal.iter().filter(|s| s.ah > 0).count();
     let standard_refinements = standard.iter().filter(|s| s.ah > 0).count();
 
-    println!("\nRefinement scans: minimal={}, standard={}", minimal_refinements, standard_refinements);
+    println!(
+        "\nRefinement scans: minimal={}, standard={}",
+        minimal_refinements, standard_refinements
+    );
 
     assert_eq!(minimal_refinements, 0, "Minimal should have no refinements");
     assert!(standard_refinements > 0, "Standard should have refinements");

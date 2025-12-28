@@ -44,9 +44,7 @@ use crate::error::{Error, Result};
 use crate::huffman::FrequencyCounter;
 use crate::huffman::{DerivedTable, HuffTable};
 use crate::marker::MarkerWriter;
-use crate::progressive::{
-    generate_baseline_scan, generate_minimal_progressive_scans,
-};
+use crate::progressive::{generate_baseline_scan, generate_minimal_progressive_scans};
 use crate::quant::{create_quant_tables, quantize_block};
 use crate::sample;
 use crate::scan_optimize::{generate_search_scans, ScanSearchConfig, ScanSelector};
@@ -1060,16 +1058,8 @@ impl Encoder {
                             )
                         };
                         self.count_ac_scan_symbols(
-                            scan,
-                            blocks,
-                            mcu_rows,
-                            mcu_cols,
-                            luma_h,
-                            luma_v,
-                            comp_idx,
-                            block_cols,
-                            block_rows,
-                            ac_freq,
+                            scan, blocks, mcu_rows, mcu_cols, luma_h, luma_v, comp_idx, block_cols,
+                            block_rows, ac_freq,
                         );
                     }
                 }
@@ -2075,7 +2065,8 @@ impl Encoder {
             let total_blocks = block_rows * block_cols;
             for block in blocks.iter().take(total_blocks) {
                 if is_refinement {
-                    encoder.encode_ac_refine(block, scan.ss, scan.se, scan.ah, scan.al, ac_table)?;
+                    encoder
+                        .encode_ac_refine(block, scan.ss, scan.se, scan.ah, scan.al, ac_table)?;
                 } else {
                     encoder.encode_ac_first(block, scan.ss, scan.se, scan.al, ac_table)?;
                 }

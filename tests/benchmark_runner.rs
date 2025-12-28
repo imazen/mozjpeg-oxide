@@ -104,12 +104,20 @@ fn calculate_dssim(
 
     let orig_rgb: Vec<RGB<u8>> = original
         .chunks(3)
-        .map(|c| RGB { r: c[0], g: c[1], b: c[2] })
+        .map(|c| RGB {
+            r: c[0],
+            g: c[1],
+            b: c[2],
+        })
         .collect();
 
     let dec_rgb: Vec<RGB<u8>> = decoded
         .chunks(3)
-        .map(|c| RGB { r: c[0], g: c[1], b: c[2] })
+        .map(|c| RGB {
+            r: c[0],
+            g: c[1],
+            b: c[2],
+        })
         .collect();
 
     let orig_img = attr
@@ -157,7 +165,13 @@ fn encode_rust(rgb: &[u8], width: u32, height: u32, quality: u8, mode: EncoderMo
 
 /// Encode with C mozjpeg using specified mode
 #[allow(unsafe_code)]
-fn encode_c_mozjpeg(rgb: &[u8], width: u32, height: u32, quality: u8, mode: EncoderMode) -> Vec<u8> {
+fn encode_c_mozjpeg(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    mode: EncoderMode,
+) -> Vec<u8> {
     use mozjpeg_sys::*;
     use std::ptr;
 
@@ -295,7 +309,10 @@ pub fn save_results(
 ) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(output_dir)?;
 
-    let filename = format!("{}_{}_{}.json", results.encoder, results.mode, results.commit);
+    let filename = format!(
+        "{}_{}_{}.json",
+        results.encoder, results.mode, results.commit
+    );
     let path = output_dir.join(filename);
 
     let json = serde_json::to_string_pretty(results)?;
@@ -308,10 +325,7 @@ pub fn save_results(
 /// Print comparison table
 pub fn print_comparison(rust: &BenchmarkResults, c: &BenchmarkResults) {
     println!("\n{:=<85}", "");
-    println!(
-        "{} [{}] vs C mozjpeg [{}]",
-        rust.commit, rust.mode, c.mode
-    );
+    println!("{} [{}] vs C mozjpeg [{}]", rust.commit, rust.mode, c.mode);
     println!("{:=<85}", "");
     println!(
         "{:>5} {:>10} {:>10} {:>8} {:>12} {:>12} {:>10}",

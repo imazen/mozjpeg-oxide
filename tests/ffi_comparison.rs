@@ -750,8 +750,12 @@ fn test_trellis_matches_c_random() {
 
         // Verify no overflow when converting to i16
         for i in 0..64 {
-            assert!(src[i] >= -32768 && src[i] <= 32767,
-                "src[{}] = {} overflows i16", i, src[i]);
+            assert!(
+                src[i] >= -32768 && src[i] <= 32767,
+                "src[{}] = {} overflows i16",
+                i,
+                src[i]
+            );
         }
 
         // Rust trellis
@@ -864,8 +868,14 @@ fn test_trellis_matches_c_quality_levels() {
 
             // Verify no overflow
             for i in 0..64 {
-                assert!(src[i] >= -32768 && src[i] <= 32767,
-                    "Q{} seed {} src[{}] = {} overflows i16", quality, seed, i, src[i]);
+                assert!(
+                    src[i] >= -32768 && src[i] <= 32767,
+                    "Q{} seed {} src[{}] = {} overflows i16",
+                    quality,
+                    seed,
+                    i,
+                    src[i]
+                );
             }
 
             let mut rust_quantized = [0i16; 64];
@@ -904,7 +914,10 @@ fn test_trellis_matches_c_quality_levels() {
         println!("Q{}: {} differences", quality, total_diffs);
         if total_diffs > 0 {
             println!("  Q{} DC quant value: {}", quality, qtbl[0]);
-            println!("  Lambda: scale1={}, scale2={}", config.lambda_log_scale1, config.lambda_log_scale2);
+            println!(
+                "  Lambda: scale1={}, scale2={}",
+                config.lambda_log_scale1, config.lambda_log_scale2
+            );
         }
         assert_eq!(
             total_diffs, 0,

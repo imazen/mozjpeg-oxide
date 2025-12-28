@@ -141,7 +141,9 @@ fn print_scan_details(jpeg_data: &[u8], label: &str) {
                 let ah_al = jpeg_data[ss_se_pos + 2];
                 let ah = ah_al >> 4;
                 let al = ah_al & 0x0F;
-                let comps: Vec<u8> = (0..ns).map(|j| jpeg_data[i + 5 + (j as usize * 2)]).collect();
+                let comps: Vec<u8> = (0..ns)
+                    .map(|j| jpeg_data[i + 5 + (j as usize * 2)])
+                    .collect();
                 println!(
                     "    Ns={} comps={:?} Ss={:2} Se={:2} Ah={} Al={}",
                     ns, comps, ss, se, ah, al

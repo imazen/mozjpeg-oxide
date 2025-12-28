@@ -33,12 +33,12 @@
 use std::io::Write;
 
 use crate::bitstream::BitWriter;
-use crate::consts::{DCTSIZE, DCTSIZE2, QuantTableIdx};
+use crate::consts::{QuantTableIdx, DCTSIZE, DCTSIZE2};
 use crate::deringing::preprocess_deringing;
 use crate::entropy::{EntropyEncoder, ProgressiveEncoder, ProgressiveSymbolCounter, SymbolCounter};
 use crate::error::{Error, Result};
-use crate::huffman::FrequencyCounter;
 use crate::huffman::DerivedTable;
+use crate::huffman::FrequencyCounter;
 use crate::marker::MarkerWriter;
 use crate::progressive::{generate_baseline_scan, generate_minimal_progressive_scans};
 use crate::quant::{create_quant_tables, quantize_block};

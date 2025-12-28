@@ -6,8 +6,8 @@
 use std::io::Write;
 
 use crate::consts::{
-    AC_CHROMINANCE_BITS, AC_CHROMINANCE_VALUES, AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES,
-    DCTSIZE2, DC_CHROMINANCE_BITS, DC_CHROMINANCE_VALUES, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES,
+    AC_CHROMINANCE_BITS, AC_CHROMINANCE_VALUES, AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, DCTSIZE2,
+    DC_CHROMINANCE_BITS, DC_CHROMINANCE_VALUES, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES,
     JPEG_NATURAL_ORDER, JPEG_SOS,
 };
 use crate::error::Result;
@@ -31,7 +31,9 @@ pub(crate) fn try_alloc_vec<T: Clone>(value: T, len: usize) -> Result<Vec<T>> {
 
 /// Helper to allocate a Vec of arrays with fallible allocation.
 #[inline]
-pub(crate) fn try_alloc_vec_array<T: Copy + Default, const N: usize>(len: usize) -> Result<Vec<[T; N]>> {
+pub(crate) fn try_alloc_vec_array<T: Copy + Default, const N: usize>(
+    len: usize,
+) -> Result<Vec<[T; N]>> {
     let mut v = Vec::new();
     v.try_reserve_exact(len)?;
     v.resize(len, [T::default(); N]);

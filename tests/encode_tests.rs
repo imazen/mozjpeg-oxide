@@ -191,7 +191,11 @@ fn test_encode_with_restart_markers() {
             rst_count += 1;
         }
     }
-    assert_eq!(rst_count, 15, "Expected 15 RST markers, found {}", rst_count);
+    assert_eq!(
+        rst_count, 15,
+        "Expected 15 RST markers, found {}",
+        rst_count
+    );
 
     let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&jpeg_data));
     let decoded = decoder

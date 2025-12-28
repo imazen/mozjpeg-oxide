@@ -166,7 +166,11 @@ fn test_baseline_parity() {
 
         println!(
             "Baseline Q{}: size={} (expected {}, diff={:.2}%), dssim={:.6}",
-            quality, size, expected_size, size_diff * 100.0, dssim
+            quality,
+            size,
+            expected_size,
+            size_diff * 100.0,
+            dssim
         );
     }
 }
@@ -219,7 +223,11 @@ fn test_progressive_parity() {
 
         println!(
             "Progressive Q{}: size={} (expected {}, diff={:.2}%), dssim={:.6}",
-            quality, size, expected_size, size_diff * 100.0, dssim
+            quality,
+            size,
+            expected_size,
+            size_diff * 100.0,
+            dssim
         );
     }
 }
@@ -269,7 +277,11 @@ fn test_max_compression_parity() {
 
         println!(
             "MaxCompression Q{}: size={} (expected {}, diff={:.2}%), dssim={:.6}",
-            quality, size, expected_size, size_diff * 100.0, dssim
+            quality,
+            size,
+            expected_size,
+            size_diff * 100.0,
+            dssim
         );
     }
 }
@@ -319,7 +331,11 @@ fn test_fastest_parity() {
 
         println!(
             "Fastest Q{}: size={} (expected {}, diff={:.2}%), dssim={:.6}",
-            quality, size, expected_size, size_diff * 100.0, dssim
+            quality,
+            size,
+            expected_size,
+            size_diff * 100.0,
+            dssim
         );
     }
 }

@@ -29,19 +29,44 @@ Pure Rust JPEG encoder based on Mozilla's [mozjpeg](https://github.com/mozilla/m
 
 ## Compression Results vs C mozjpeg
 
-Tested on full [Kodak](http://r0k.us/graphics/kodak/) corpus (24 images).
-Settings: progressive mode, trellis quantization, optimized Huffman, 4:2:0 subsampling.
+Tested on full [Kodak](http://r0k.us/graphics/kodak/) corpus (24 images), trellis + Huffman opt, 4:2:0 subsampling.
+
+### Max Compression Mode (`Encoder::max_compression()`)
+
+Progressive mode with `optimize_scans=true` - each AC scan gets its own optimal Huffman table.
 
 | Quality | Rust vs C | Notes |
 |---------|-----------|-------|
-| Q50 | **-1.35%** | Rust produces smaller files |
-| Q75 | **+0.14%** | Near-identical |
-| Q85 | +1.39% | Slight gap |
-| Q90 | +2.58% | Gap grows |
-| Q95 | +3.61% | |
-| Q97 | +4.87% | |
+| Q50 | **-0.39%** | Rust produces smaller files |
+| Q60 | **-0.26%** | Rust smaller |
+| Q70 | **-0.38%** | Rust smaller |
+| Q75 | **-0.14%** | Rust smaller |
+| Q80 | +0.17% | Near-identical |
+| Q85 | +0.42% | Near-identical |
+| Q90 | +0.97% | Slight gap |
+| Q95 | +1.59% | |
+| Q97 | +2.14% | |
+| Q100 | +1.00% | |
 
-**Summary**: At Q50-Q75, Rust matches or beats C mozjpeg. At Q85+, files are 1-5% larger due to differences in progressive scan structure (see [Differences from C mozjpeg](#differences-from-c-mozjpeg)).
+### All Modes Comparison
+
+| Quality | Baseline | Progressive | Max Compression |
+|---------|----------|-------------|-----------------|
+| Q50 | +0.15% | **-1.35%** | **-0.39%** |
+| Q60 | +0.47% | **-0.81%** | **-0.26%** |
+| Q70 | +0.54% | **-0.44%** | **-0.38%** |
+| Q75 | +0.87% | +0.14% | **-0.14%** |
+| Q80 | +1.34% | +0.84% | +0.17% |
+| Q85 | +1.75% | +1.39% | +0.42% |
+| Q90 | +2.73% | +2.58% | +0.97% |
+| Q95 | +3.87% | +3.61% | +1.59% |
+| Q97 | +5.36% | +4.87% | +2.14% |
+| Q100 | +3.53% | +2.58% | +1.00% |
+
+**Summary**:
+- **Max Compression**: Rust matches or beats C at Q50-Q80, within 2.2% at all quality levels
+- **Progressive**: Rust beats C at Q50-Q70, within 5% at all levels
+- **Baseline**: Larger gap due to trellis quantization differences at high quality
 
 Visual quality (SSIMULACRA2, Butteraugli) is virtually identical at all quality levels.
 
@@ -118,17 +143,20 @@ mozjpeg-oxide aims for compatibility with C mozjpeg but has some differences:
 
 | Feature | mozjpeg-oxide | C mozjpeg |
 |---------|---------------|-----------|
-| **Progressive scan script** | Simple 4-scan | 9-scan with successive approximation |
-| **optimize_scans** | Disabled by default | Enabled in JCP_MAX_COMPRESSION |
+| **Progressive scan script** | Simple 4-scan (or optimize_scans) | 9-scan with successive approximation |
+| **optimize_scans** | Per-scan Huffman tables | Per-scan Huffman tables |
 | **Trellis EOB optimization** | Not implemented | Available (rarely used) |
 | **Arithmetic coding** | Not implemented | Available (rarely used) |
 | **Grayscale progressive** | Not implemented | Available |
 
 ### Why the file size gap at high quality?
 
-C mozjpeg's `jpeg_simple_progression()` uses a 9-scan successive approximation script that splits coefficient bits into coarse and fine layers. This provides better Huffman coding efficiency, especially at high quality settings where more bits per coefficient are used.
+At quality levels above Q85, there's a small gap (1-3%) due to differences in the progressive scan structure:
 
-mozjpeg-oxide uses a simpler 4-scan script (DC + full AC for each component). This produces identical visual quality but slightly larger files at Q85+.
+- **C mozjpeg** uses a 9-scan successive approximation (SA) script that splits coefficient bits into coarse and fine layers
+- **mozjpeg-oxide** uses a 4-scan script (DC + full AC for each component) with per-scan optimal Huffman tables
+
+With `optimize_scans=true` (enabled in `max_compression()`), mozjpeg-oxide matches or beats C mozjpeg at Q50-Q80.
 
 ### Matching C mozjpeg output exactly
 

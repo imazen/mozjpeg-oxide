@@ -204,6 +204,30 @@ This is a significant architectural change. The current implementation still
 produces valid, well-optimized progressive JPEGs - just not with successive
 approximation, which limits high-quality compression gains.
 
+#### AC Refinement Decoder Errors - WORKAROUND APPLIED (Dec 2024)
+
+**Symptom:** 8/24 Kodak images fail to decode with "failed to decode huffman code"
+when using progressive mode with successive approximation refinement scans.
+
+**Root Cause:** AC refinement encoding (`encode_ac_refine` in entropy.rs) produces
+corrupted bitstreams for certain images. The bug manifests when using scan scripts
+with Ah > 0 (refinement scans), such as the 9-scan JCP_MAX_COMPRESSION script.
+
+**Affected configurations:**
+- Any progressive script with AC refinement scans (Ah > 0)
+- Both `optimize_scans=true` and the 9-scan JCP_MAX_COMPRESSION script
+
+**Workaround applied:**
+- Changed default to 4-scan minimal progressive script (no SA)
+- Set `al_max_luma=0` and `al_max_chroma=0` in ScanSearchConfig::default()
+- This avoids generating any refinement scans
+
+**Images that were failing (before workaround):**
+1.png, 5.png, 7.png, 8.png, 9.png, 10.png, 12.png, 15.png
+
+**TODO:** Debug `encode_ac_refine` to fix the bitstream corruption. The issue
+appears to be in correction bit handling or EOBRUN flushing for refinement scans.
+
 #### Rust vs C Pixel Difference - RESOLVED ✅
 
 Previously reported "max diff ~11" was due to comparing different encoding modes:

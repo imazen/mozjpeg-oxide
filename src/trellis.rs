@@ -899,6 +899,90 @@ pub fn compute_block_eob_info(
     }
 }
 
+/// Estimate EOB info from an already-quantized block.
+///
+/// This function estimates the `BlockEobInfo` needed for cross-block EOB optimization
+/// when full trellis cost information is not available. The estimates are based on:
+/// - `zero_block_cost`: Sum of squared coefficients (distortion proxy)
+/// - `best_cost`: Estimated encoding cost based on coefficient magnitudes
+/// - `best_cost_skip`: best_cost minus approximate EOB cost
+///
+/// # Arguments
+/// * `block` - Quantized coefficient block
+/// * `ac_table` - AC Huffman table for cost estimation
+/// * `ss` - Spectral selection start
+/// * `se` - Spectral selection end
+///
+/// # Returns
+/// Estimated `BlockEobInfo` for use with `optimize_eob_runs`.
+pub fn estimate_block_eob_info(
+    block: &[i16; DCTSIZE2],
+    ac_table: &DerivedTable,
+    ss: usize,
+    se: usize,
+) -> BlockEobInfo {
+    let mut zero_block_cost = 0.0f32;
+    let mut best_cost = 0.0f32;
+    let mut last_nonzero_idx = 0usize;
+    let mut has_nonzero_ac = false;
+    let mut run = 0u8;
+
+    for i in ss..=se {
+        let z = JPEG_NATURAL_ORDER[i];
+        let coef = block[z];
+
+        if coef == 0 {
+            run = run.saturating_add(1);
+        } else {
+            has_nonzero_ac = true;
+            last_nonzero_idx = i;
+
+            // Distortion from zeroing this coefficient
+            zero_block_cost += (coef as f32) * (coef as f32);
+
+            // Estimate encoding cost: run/size symbol + value bits
+            let nbits = jpeg_nbits(coef) as u8;
+            let symbol = ((run.min(15)) << 4) | nbits;
+            let (_, symbol_size) = ac_table.get_code(symbol);
+            best_cost += symbol_size as f32 + nbits as f32;
+
+            // Handle ZRL for runs > 15
+            let full_zrls = run / 16;
+            if full_zrls > 0 {
+                let (_, zrl_size) = ac_table.get_code(0xF0);
+                best_cost += (full_zrls as f32) * (zrl_size as f32);
+            }
+
+            run = 0;
+        }
+    }
+
+    // Determine EOB status
+    let requires_eob = if !has_nonzero_ac {
+        2 // All-zero block
+    } else if last_nonzero_idx >= se {
+        0 // No EOB needed (last coef at end)
+    } else {
+        1 // Needs EOB
+    };
+
+    // Estimate EOB cost
+    let eob_cost = if requires_eob == 1 {
+        let (_, eob_size) = ac_table.get_code(0x00); // EOB symbol
+        eob_size as f32
+    } else {
+        0.0
+    };
+
+    BlockEobInfo {
+        zero_block_cost,
+        best_cost: best_cost + eob_cost,
+        best_cost_skip: best_cost,
+        requires_eob,
+        has_nonzero_ac,
+    }
+}
+
 /// Quantize a block with simple rounding (no trellis optimization).
 ///
 /// This is used when trellis is disabled.
@@ -944,7 +1028,8 @@ mod tests {
         let config = TrellisConfig::default();
         assert!(config.enabled);
         assert!(config.dc_enabled);
-        assert!(config.eob_opt);
+        // EOB optimization is disabled by default (matches C mozjpeg)
+        assert!(!config.eob_opt);
         assert!((config.lambda_log_scale1 - 14.75).abs() < 0.01);
         assert!((config.lambda_log_scale2 - 16.5).abs() < 0.01);
     }
@@ -1066,5 +1151,142 @@ mod tests {
     fn test_trellis_config_disabled() {
         let config = TrellisConfig::disabled();
         assert!(!config.enabled);
+    }
+
+    #[test]
+    fn test_estimate_block_eob_info_all_zero() {
+        let ac_table = create_ac_table();
+        let block = [0i16; DCTSIZE2];
+
+        let info = estimate_block_eob_info(&block, &ac_table, 1, 63);
+
+        assert_eq!(info.requires_eob, 2); // All-zero block
+        assert!(!info.has_nonzero_ac);
+        assert_eq!(info.zero_block_cost, 0.0);
+    }
+
+    #[test]
+    fn test_estimate_block_eob_info_with_coefficients() {
+        let ac_table = create_ac_table();
+        let mut block = [0i16; DCTSIZE2];
+        // Set some AC coefficients (zigzag positions 1 and 2)
+        block[JPEG_NATURAL_ORDER[1]] = 5;
+        block[JPEG_NATURAL_ORDER[2]] = 3;
+
+        let info = estimate_block_eob_info(&block, &ac_table, 1, 63);
+
+        assert_eq!(info.requires_eob, 1); // Needs EOB (last nonzero before Se)
+        assert!(info.has_nonzero_ac);
+        assert!(info.zero_block_cost > 0.0); // Should have distortion from zeroing
+        assert!(info.best_cost > 0.0); // Should have encoding cost
+    }
+
+    #[test]
+    fn test_estimate_block_eob_info_last_at_end() {
+        let ac_table = create_ac_table();
+        let mut block = [0i16; DCTSIZE2];
+        // Set coefficient at position 63 (last in zigzag order)
+        block[JPEG_NATURAL_ORDER[63]] = 2;
+
+        let info = estimate_block_eob_info(&block, &ac_table, 1, 63);
+
+        assert_eq!(info.requires_eob, 0); // No EOB needed (last coef at Se)
+        assert!(info.has_nonzero_ac);
+    }
+
+    #[test]
+    fn test_optimize_eob_runs_no_change_needed() {
+        let ac_table = create_ac_table();
+
+        // Create blocks where each has coefficients - no runs to optimize
+        let mut blocks = vec![[0i16; DCTSIZE2]; 4];
+        for (i, block) in blocks.iter_mut().enumerate() {
+            block[JPEG_NATURAL_ORDER[1]] = (i + 1) as i16 * 10;
+        }
+
+        let eob_info: Vec<_> = blocks
+            .iter()
+            .map(|b| estimate_block_eob_info(b, &ac_table, 1, 63))
+            .collect();
+
+        let zeroed = optimize_eob_runs(&mut blocks, &eob_info, &ac_table, 1, 63);
+
+        // With non-zero coefficients in each block, optimization may zero some
+        // but the function should not crash and should return a valid count
+        assert!(zeroed <= 4 * 63); // Can't zero more coefficients than exist
+    }
+
+    #[test]
+    fn test_optimize_eob_runs_with_zero_blocks() {
+        let ac_table = create_ac_table();
+
+        // Create a mix of blocks: some with content, some all-zero
+        let mut blocks = vec![[0i16; DCTSIZE2]; 5];
+        blocks[0][JPEG_NATURAL_ORDER[1]] = 50; // Has content
+                                               // blocks[1] is all zero
+                                               // blocks[2] is all zero
+        blocks[3][JPEG_NATURAL_ORDER[1]] = 30; // Has content
+                                               // blocks[4] is all zero
+
+        let eob_info: Vec<_> = blocks
+            .iter()
+            .map(|b| estimate_block_eob_info(b, &ac_table, 1, 63))
+            .collect();
+
+        // Verify the EOB info is correct
+        assert!(eob_info[0].has_nonzero_ac);
+        assert!(!eob_info[1].has_nonzero_ac);
+        assert!(!eob_info[2].has_nonzero_ac);
+        assert!(eob_info[3].has_nonzero_ac);
+        assert!(!eob_info[4].has_nonzero_ac);
+
+        let zeroed = optimize_eob_runs(&mut blocks, &eob_info, &ac_table, 1, 63);
+
+        // The optimization should run without error
+        // The exact number zeroed depends on the cost calculations
+        assert!(zeroed <= 5 * 63);
+    }
+
+    #[test]
+    fn test_eob_optimization_integration() {
+        // Test that EOB optimization produces valid output when integrated
+        let ac_table = create_ac_table();
+        let qtable = create_qtable();
+        let config = TrellisConfig::default();
+
+        // Create several blocks with varying content
+        let mut blocks = Vec::new();
+        for i in 0..10 {
+            let mut src = [0i32; DCTSIZE2];
+            // Alternate between content and empty
+            if i % 3 != 0 {
+                src[JPEG_NATURAL_ORDER[1]] = ((i + 1) * 50) as i32 * 8;
+                src[JPEG_NATURAL_ORDER[5]] = ((i + 1) * 20) as i32 * 8;
+            }
+
+            let mut quantized = [0i16; DCTSIZE2];
+            trellis_quantize_block(&src, &mut quantized, &qtable, &ac_table, &config);
+            blocks.push(quantized);
+        }
+
+        // Run EOB optimization
+        let eob_info: Vec<_> = blocks
+            .iter()
+            .map(|b| estimate_block_eob_info(b, &ac_table, 1, 63))
+            .collect();
+
+        let zeroed = optimize_eob_runs(&mut blocks, &eob_info, &ac_table, 1, 63);
+
+        // Verify blocks are still valid (DC should be preserved)
+        for block in &blocks {
+            // DC coefficient can be anything, just checking blocks are accessible
+            let _ = block[0];
+        }
+
+        // The optimization ran without panicking
+        println!(
+            "EOB optimization zeroed {} coefficients across 10 blocks",
+            zeroed
+        );
     }
 }

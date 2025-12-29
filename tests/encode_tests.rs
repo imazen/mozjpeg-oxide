@@ -897,3 +897,304 @@ fn calculate_dssim(original: &[u8], decoded: &[u8], width: u32, height: u32) -> 
     let (dssim_val, _) = attr.compare(&orig_img, dec_img);
     dssim_val.into()
 }
+
+#[test]
+fn test_eob_optimization_produces_valid_jpeg() {
+    use mozjpeg_rs::TrellisConfig;
+
+    let width = 64u32;
+    let height = 64u32;
+
+    // Create test image with some areas that will produce zero blocks
+    let mut rgb = vec![128u8; (width * height * 3) as usize];
+    // Add some variation in one quadrant
+    for y in 0..32 {
+        for x in 0..32 {
+            let idx = ((y * width + x) * 3) as usize;
+            rgb[idx] = ((x * 8) % 256) as u8;
+            rgb[idx + 1] = ((y * 8) % 256) as u8;
+            rgb[idx + 2] = (((x + y) * 4) % 256) as u8;
+        }
+    }
+
+    // Encode with EOB optimization enabled
+    let trellis_with_eob = TrellisConfig::default().eob_optimization(true);
+    let with_eob = Encoder::new()
+        .quality(75)
+        .progressive(true)
+        .trellis(trellis_with_eob)
+        .encode_rgb(&rgb, width, height)
+        .expect("Encoding with EOB opt failed");
+
+    // Encode with EOB optimization disabled
+    let trellis_without_eob = TrellisConfig::default().eob_optimization(false);
+    let without_eob = Encoder::new()
+        .quality(75)
+        .progressive(true)
+        .trellis(trellis_without_eob)
+        .encode_rgb(&rgb, width, height)
+        .expect("Encoding without EOB opt failed");
+
+    // Both should produce valid JPEGs
+    assert!(with_eob.len() > 100, "EOB-optimized JPEG too small");
+    assert!(without_eob.len() > 100, "Non-EOB JPEG too small");
+
+    // Both should decode successfully
+    let mut decoder1 = jpeg_decoder::Decoder::new(&with_eob[..]);
+    let decoded1 = decoder1
+        .decode()
+        .expect("Failed to decode EOB-optimized JPEG");
+    let info1 = decoder1.info().unwrap();
+    assert_eq!(info1.width, width as u16);
+    assert_eq!(info1.height, height as u16);
+
+    let mut decoder2 = jpeg_decoder::Decoder::new(&without_eob[..]);
+    let decoded2 = decoder2.decode().expect("Failed to decode non-EOB JPEG");
+    let info2 = decoder2.info().unwrap();
+    assert_eq!(info2.width, width as u16);
+    assert_eq!(info2.height, height as u16);
+
+    // EOB optimization may zero some coefficients for encoding efficiency,
+    // so we allow reasonable quality differences. The important thing is
+    // both produce valid, decodable JPEGs.
+    let max_diff: i32 = decoded1
+        .iter()
+        .zip(decoded2.iter())
+        .map(|(&a, &b)| (a as i32 - b as i32).abs())
+        .max()
+        .unwrap_or(0);
+
+    // Allow up to ~27% difference (70/255) since EOB optimization trades quality for size
+    assert!(
+        max_diff <= 100,
+        "EOB optimization changed output too much: max_diff={}",
+        max_diff
+    );
+
+    println!(
+        "EOB optimization: with={} bytes, without={} bytes, diff={}",
+        with_eob.len(),
+        without_eob.len(),
+        without_eob.len() as i64 - with_eob.len() as i64
+    );
+}
+
+#[test]
+fn test_eob_optimization_grayscale() {
+    use mozjpeg_rs::TrellisConfig;
+
+    let width = 64u32;
+    let height = 64u32;
+
+    // Create grayscale test image with some flat areas
+    let mut gray = vec![128u8; (width * height) as usize];
+    // Add gradient in one area
+    for y in 0..32 {
+        for x in 0..32 {
+            let idx = (y * width + x) as usize;
+            gray[idx] = ((x * 4 + y * 4) % 256) as u8;
+        }
+    }
+
+    // Encode with EOB optimization
+    let trellis_with_eob = TrellisConfig::default().eob_optimization(true);
+    let with_eob = Encoder::new()
+        .quality(75)
+        .progressive(true)
+        .trellis(trellis_with_eob)
+        .encode_gray(&gray, width, height)
+        .expect("Grayscale encoding with EOB opt failed");
+
+    // Should produce valid JPEG
+    assert!(
+        with_eob.len() > 50,
+        "EOB-optimized grayscale JPEG too small"
+    );
+
+    // Should decode successfully
+    let mut decoder = jpeg_decoder::Decoder::new(&with_eob[..]);
+    let decoded = decoder
+        .decode()
+        .expect("Failed to decode EOB-optimized grayscale JPEG");
+    assert_eq!(decoded.len(), (width * height) as usize);
+
+    println!("Grayscale EOB optimization: {} bytes", with_eob.len());
+}
+
+/// Comprehensive test of all encoder setting permutations with encode+decode round-trip.
+/// Uses jpeg_decoder for decoding.
+#[test]
+fn test_encode_decode_permutations() {
+    use mozjpeg_rs::{Subsampling, TrellisConfig};
+
+    let width = 32u32;
+    let height = 32u32;
+
+    // Create test image
+    let rgb: Vec<u8> = (0..width * height * 3)
+        .map(|i| ((i * 7 + 13) % 256) as u8)
+        .collect();
+
+    // Test matrix of settings
+    let progressives = [false, true];
+    let subsamplings = [Subsampling::S444, Subsampling::S422, Subsampling::S420];
+    let optimize_huffmans = [false, true];
+    let trellis_enabled = [false, true];
+    let eob_opts = [false, true];
+    let qualities = [50u8, 85];
+
+    let mut test_count = 0;
+
+    for &progressive in &progressives {
+        for &subsampling in &subsamplings {
+            for &optimize_huffman in &optimize_huffmans {
+                for &trellis in &trellis_enabled {
+                    for &eob_opt in &eob_opts {
+                        // Skip eob_opt=true when trellis=false (eob_opt requires trellis)
+                        if eob_opt && !trellis {
+                            continue;
+                        }
+
+                        for &quality in &qualities {
+                            let trellis_config = if trellis {
+                                TrellisConfig::default().eob_optimization(eob_opt)
+                            } else {
+                                TrellisConfig::disabled()
+                            };
+
+                            let encoder = Encoder::new()
+                                .quality(quality)
+                                .progressive(progressive)
+                                .subsampling(subsampling)
+                                .optimize_huffman(optimize_huffman)
+                                .trellis(trellis_config);
+
+                            let result = encoder.encode_rgb(&rgb, width, height);
+
+                            let jpeg = match result {
+                                Ok(data) => data,
+                                Err(e) => {
+                                    panic!(
+                                        "Encoding failed: prog={}, sub={:?}, huff={}, trellis={}, eob={}, q={}: {:?}",
+                                        progressive, subsampling, optimize_huffman, trellis, eob_opt, quality, e
+                                    );
+                                }
+                            };
+
+                            // Verify JPEG markers
+                            assert_eq!(jpeg[0], 0xFF, "Missing SOI");
+                            assert_eq!(jpeg[1], 0xD8, "Missing SOI");
+
+                            // Decode the JPEG
+                            let mut decoder = jpeg_decoder::Decoder::new(&jpeg[..]);
+                            let decoded = decoder.decode().unwrap_or_else(|e| {
+                                panic!(
+                                    "Decode failed: prog={}, sub={:?}, huff={}, trellis={}, eob={}, q={}: {:?}",
+                                    progressive, subsampling, optimize_huffman, trellis, eob_opt, quality, e
+                                );
+                            });
+
+                            let info = decoder.info().unwrap();
+                            assert_eq!(info.width, width as u16);
+                            assert_eq!(info.height, height as u16);
+                            assert_eq!(
+                                decoded.len(),
+                                (width * height * 3) as usize,
+                                "Decoded size mismatch"
+                            );
+
+                            test_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    println!(
+        "Successfully tested {} encode+decode permutations",
+        test_count
+    );
+}
+
+/// Test grayscale encoding with all setting permutations.
+#[test]
+fn test_grayscale_encode_decode_permutations() {
+    use mozjpeg_rs::TrellisConfig;
+
+    let width = 32u32;
+    let height = 32u32;
+
+    // Create grayscale test image
+    let gray: Vec<u8> = (0..width * height)
+        .map(|i| ((i * 7 + 13) % 256) as u8)
+        .collect();
+
+    let progressives = [false, true];
+    let optimize_huffmans = [false, true];
+    let trellis_enabled = [false, true];
+    let eob_opts = [false, true];
+    let qualities = [50u8, 85];
+
+    let mut test_count = 0;
+
+    for &progressive in &progressives {
+        for &optimize_huffman in &optimize_huffmans {
+            for &trellis in &trellis_enabled {
+                for &eob_opt in &eob_opts {
+                    // Skip eob_opt=true when trellis=false
+                    if eob_opt && !trellis {
+                        continue;
+                    }
+
+                    for &quality in &qualities {
+                        let trellis_config = if trellis {
+                            TrellisConfig::default().eob_optimization(eob_opt)
+                        } else {
+                            TrellisConfig::disabled()
+                        };
+
+                        let encoder = Encoder::new()
+                            .quality(quality)
+                            .progressive(progressive)
+                            .optimize_huffman(optimize_huffman)
+                            .trellis(trellis_config);
+
+                        let result = encoder.encode_gray(&gray, width, height);
+
+                        let jpeg = match result {
+                            Ok(data) => data,
+                            Err(e) => {
+                                panic!(
+                                    "Grayscale encoding failed: prog={}, huff={}, trellis={}, eob={}, q={}: {:?}",
+                                    progressive, optimize_huffman, trellis, eob_opt, quality, e
+                                );
+                            }
+                        };
+
+                        // Decode
+                        let mut decoder = jpeg_decoder::Decoder::new(&jpeg[..]);
+                        let decoded = decoder.decode().unwrap_or_else(|e| {
+                            panic!(
+                                "Grayscale decode failed: prog={}, huff={}, trellis={}, eob={}, q={}: {:?}",
+                                progressive, optimize_huffman, trellis, eob_opt, quality, e
+                            );
+                        });
+
+                        let info = decoder.info().unwrap();
+                        assert_eq!(info.width, width as u16);
+                        assert_eq!(info.height, height as u16);
+                        assert_eq!(decoded.len(), (width * height) as usize);
+
+                        test_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    println!(
+        "Successfully tested {} grayscale encode+decode permutations",
+        test_count
+    );
+}

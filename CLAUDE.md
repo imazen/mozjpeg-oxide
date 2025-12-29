@@ -154,8 +154,12 @@ let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
 
 ### Remaining Work
 - **Performance optimization (SIMD)** - DCT and color conversion are 7.5x slower than C
-- EOB cross-block integration (`trellis_eob_opt` - disabled by default in C mozjpeg)
 - Arithmetic coding (optional, rarely used)
+
+### Optional Features (Disabled by Default)
+- **EOB cross-block optimization** (`TrellisConfig::eob_optimization(true)`) - Experimental
+  cross-block EOBRUN optimization. Disabled by default due to aggressive coefficient zeroing
+  in some cases. Enable with `TrellisConfig::default().eob_optimization(true)` if needed.
 
 ### Recent Fixes (Dec 2024)
 - **AC refinement ZRL encoding** (Dec 2024): Fixed bug where ZRL (zero-run-length) symbols

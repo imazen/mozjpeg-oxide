@@ -502,7 +502,10 @@ impl Default for TrellisConfig {
         Self {
             enabled: true,
             dc_enabled: true,
-            eob_opt: true,
+            // Disabled by default to match C mozjpeg behavior.
+            // The cross-block EOB optimization algorithm has known issues with
+            // aggressive coefficient zeroing in some cases (especially with subsampling).
+            eob_opt: false,
             use_lambda_weight_tbl: true,
             use_scans_in_trellis: false,
             q_opt: false,

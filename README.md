@@ -145,7 +145,7 @@ mozjpeg-rs aims for compatibility with C mozjpeg but has some differences:
 |---------|---------------|-----------|
 | **Progressive scan script** | Simple 4-scan (or optimize_scans) | 9-scan with successive approximation |
 | **optimize_scans** | Per-scan Huffman tables | Per-scan Huffman tables |
-| **Trellis EOB optimization** | Not implemented | Available (rarely used) |
+| **Trellis EOB optimization** | Available (opt-in) | Available (rarely used) |
 | **Arithmetic coding** | Not implemented | Available (rarely used) |
 | **Grayscale progressive** | Yes | Yes |
 

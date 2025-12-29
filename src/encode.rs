@@ -597,6 +597,20 @@ impl Encoder {
                 }
             }
 
+            // Run EOB optimization if enabled (cross-block EOBRUN optimization)
+            if self.trellis.enabled && self.trellis.eob_opt {
+                use crate::trellis::{estimate_block_eob_info, optimize_eob_runs};
+
+                // Estimate EOB info for each block
+                let eob_info: Vec<_> = y_blocks
+                    .iter()
+                    .map(|block| estimate_block_eob_info(block, &ac_luma_derived, 1, 63))
+                    .collect();
+
+                // Optimize EOB runs across all blocks
+                optimize_eob_runs(&mut y_blocks, &eob_info, &ac_luma_derived, 1, 63);
+            }
+
             // Generate progressive scan script for grayscale (1 component)
             let scans = generate_mozjpeg_max_compression_scans(1);
 
@@ -1127,6 +1141,32 @@ impl Encoder {
                         1,
                     );
                 }
+            }
+
+            // Run EOB optimization if enabled (cross-block EOBRUN optimization)
+            if self.trellis.enabled && self.trellis.eob_opt {
+                use crate::trellis::{estimate_block_eob_info, optimize_eob_runs};
+
+                // Y component
+                let y_eob_info: Vec<_> = y_blocks
+                    .iter()
+                    .map(|block| estimate_block_eob_info(block, &ac_luma_derived, 1, 63))
+                    .collect();
+                optimize_eob_runs(&mut y_blocks, &y_eob_info, &ac_luma_derived, 1, 63);
+
+                // Cb component
+                let cb_eob_info: Vec<_> = cb_blocks
+                    .iter()
+                    .map(|block| estimate_block_eob_info(block, &ac_chroma_derived, 1, 63))
+                    .collect();
+                optimize_eob_runs(&mut cb_blocks, &cb_eob_info, &ac_chroma_derived, 1, 63);
+
+                // Cr component
+                let cr_eob_info: Vec<_> = cr_blocks
+                    .iter()
+                    .map(|block| estimate_block_eob_info(block, &ac_chroma_derived, 1, 63))
+                    .collect();
+                optimize_eob_runs(&mut cr_blocks, &cr_eob_info, &ac_chroma_derived, 1, 63);
             }
 
             // Generate progressive scan script

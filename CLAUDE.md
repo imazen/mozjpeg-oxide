@@ -22,6 +22,11 @@ If tests fail, find and fix the bug. Never:
 
 ### Resolved Issues
 
+**AC refinement encoding (FIXED Dec 2024):**
+- Root cause: ZRL loop only ran for newly-nonzero coefficients, not previously-coded ones
+- Fix: Restructured encode_ac_refine() to match C mozjpeg's loop structure exactly
+- Result: All progressive modes with successive approximation now work correctly
+
 **optimize_scans producing larger files (FIXED Dec 2024):**
 - Root cause: Trial encoder used per-scan Huffman tables, actual encoder used global tables
 - Fix: Actual encoder now uses per-scan AC Huffman tables when optimize_scans=true
@@ -64,7 +69,7 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
 
 **Mode explanations:**
 - **Baseline** (`progressive(false)`): Sequential DCT with trellis quantization
-- **Progressive** (`progressive(true), optimize_scans(false)`): 4-scan minimal script
+- **Progressive** (`progressive(true), optimize_scans(false)`): 9-scan JCP_MAX_COMPRESSION script with successive approximation
 - **Max Compression** (`Encoder::max_compression()`): Progressive + `optimize_scans=true` with per-scan Huffman tables
 
 **Note:** Use `Encoder::max_compression()` for best compression parity with C mozjpeg.
@@ -151,6 +156,9 @@ let jpeg_data = encoder.encode_rgb(&pixels, width, height)?;
 - Arithmetic coding (optional, rarely used)
 
 ### Recent Fixes
+- **AC refinement ZRL encoding** (Dec 2024): Fixed bug where ZRL (zero-run-length) symbols
+  weren't emitted for previously-coded coefficients, causing decoder errors on 8/24 images.
+  Now uses 9-scan JCP_MAX_COMPRESSION script with full successive approximation.
 - **Progressive AC scan block count** (Dec 2024): Fixed bug where non-MCU-aligned images
   with subsampling produced corrupted progressive JPEGs. AC scans now correctly encode
   `ceil(width/8) × ceil(height/8)` blocks instead of MCU-padded block count.
@@ -204,29 +212,23 @@ This is a significant architectural change. The current implementation still
 produces valid, well-optimized progressive JPEGs - just not with successive
 approximation, which limits high-quality compression gains.
 
-#### AC Refinement Decoder Errors - WORKAROUND APPLIED (Dec 2024)
+#### AC Refinement Decoder Errors - FIXED ✅ (Dec 2024)
 
-**Symptom:** 8/24 Kodak images fail to decode with "failed to decode huffman code"
+**Symptom:** 8/24 Kodak images failed to decode with "failed to decode huffman code"
 when using progressive mode with successive approximation refinement scans.
 
-**Root Cause:** AC refinement encoding (`encode_ac_refine` in entropy.rs) produces
-corrupted bitstreams for certain images. The bug manifests when using scan scripts
-with Ah > 0 (refinement scans), such as the 9-scan JCP_MAX_COMPRESSION script.
+**Root Cause:** In `encode_ac_refine()` and `count_ac_refine()`, the ZRL (zero-run-length)
+loop was only inside the "temp == 1" (newly nonzero) branch, but it needs to run for BOTH
+temp > 1 (previously coded) AND temp == 1 cases. When a long run of zeros preceded a
+previously coded coefficient, ZRL symbols weren't emitted, corrupting the bitstream.
 
-**Affected configurations:**
-- Any progressive script with AC refinement scans (Ah > 0)
-- Both `optimize_scans=true` and the 9-scan JCP_MAX_COMPRESSION script
+**Fix:** Restructured the encoding loop to match C mozjpeg's jcphuff.c exactly:
+1. Pre-pass to compute `absvalues[]` and find `eob` (last newly-nonzero position)
+2. ZRL loop now runs for all non-zero coefficients before the temp > 1 vs temp == 1 check
+3. Added `k <= eob` condition to prevent ZRL emission after the last newly-nonzero
 
-**Workaround applied:**
-- Changed default to 4-scan minimal progressive script (no SA)
-- Set `al_max_luma=0` and `al_max_chroma=0` in ScanSearchConfig::default()
-- This avoids generating any refinement scans
-
-**Images that were failing (before workaround):**
-1.png, 5.png, 7.png, 8.png, 9.png, 10.png, 12.png, 15.png
-
-**TODO:** Debug `encode_ac_refine` to fix the bitstream corruption. The issue
-appears to be in correction bit handling or EOBRUN flushing for refinement scans.
+**Status:** All 24 Kodak images decode successfully with 9-scan JCP_MAX_COMPRESSION script.
+Successive approximation (al_max_luma=3, al_max_chroma=2) is now fully enabled.
 
 #### Rust vs C Pixel Difference - RESOLVED ✅
 

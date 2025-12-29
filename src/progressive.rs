@@ -172,6 +172,80 @@ pub fn generate_mozjpeg_max_compression_scans(num_components: u8) -> Vec<ScanInf
     scans
 }
 
+/// Generate C mozjpeg's jpeg_simple_progression scan script (optimize_scans=false).
+///
+/// This exactly matches jcparam.c lines 961-979 - the "else" branch when
+/// optimize_scans is disabled. It's a 10-scan successive approximation script.
+///
+/// Script (10 scans for YCbCr):
+/// 1. DC all components (Ah=0, Al=1) - coarse DC bits
+/// 2. Y: AC 1-5 (Ah=0, Al=2) - get some luma data out quickly
+/// 3. Cr: AC 1-63 (Ah=0, Al=1) - chroma is small, do full range
+/// 4. Cb: AC 1-63 (Ah=0, Al=1)
+/// 5. Y: AC 6-63 (Ah=0, Al=2) - complete luma spectral selection
+/// 6. Y: AC 1-63 (Ah=2, Al=1) - refine luma
+/// 7. DC all components (Ah=1, Al=0) - DC refinement
+/// 8. Cr: AC 1-63 (Ah=1, Al=0) - refine chroma
+/// 9. Cb: AC 1-63 (Ah=1, Al=0)
+/// 10. Y: AC 1-63 (Ah=1, Al=0) - luma last since it's usually largest
+pub fn generate_c_simple_progressive_scans(num_components: u8) -> Vec<ScanInfo> {
+    let mut scans = Vec::new();
+
+    if num_components == 1 {
+        // Grayscale: similar structure with SA
+        let mut dc_scan = ScanInfo::dc_scan(1);
+        dc_scan.al = 1;
+        scans.push(dc_scan);
+
+        scans.push(ScanInfo::ac_scan(0, 1, 5, 0, 2));
+        scans.push(ScanInfo::ac_scan(0, 6, 63, 0, 2));
+        scans.push(ScanInfo::ac_scan(0, 1, 63, 2, 1));
+
+        let mut dc_refine = ScanInfo::dc_scan(1);
+        dc_refine.ah = 1;
+        dc_refine.al = 0;
+        scans.push(dc_refine);
+
+        scans.push(ScanInfo::ac_scan(0, 1, 63, 1, 0));
+    } else {
+        // YCbCr: 10 scans matching jcparam.c lines 961-979
+
+        // 1. Initial DC scan with point transform (Al=1)
+        let mut dc_scan = ScanInfo::dc_scan(num_components);
+        dc_scan.al = 1;
+        scans.push(dc_scan);
+
+        // 2. Initial AC scan: get some luma data out in a hurry
+        scans.push(ScanInfo::ac_scan(0, 1, 5, 0, 2));
+
+        // 3-4. Chroma data is too small to be worth expending many scans on
+        // Note: C does Cr then Cb (components 2, 1)
+        scans.push(ScanInfo::ac_scan(2, 1, 63, 0, 1));
+        scans.push(ScanInfo::ac_scan(1, 1, 63, 0, 1));
+
+        // 5. Complete spectral selection for luma AC
+        scans.push(ScanInfo::ac_scan(0, 6, 63, 0, 2));
+
+        // 6. Refine next bit of luma AC
+        scans.push(ScanInfo::ac_scan(0, 1, 63, 2, 1));
+
+        // 7. Finish DC successive approximation
+        let mut dc_refine = ScanInfo::dc_scan(num_components);
+        dc_refine.ah = 1;
+        dc_refine.al = 0;
+        scans.push(dc_refine);
+
+        // 8-9. Finish AC successive approximation for chroma
+        scans.push(ScanInfo::ac_scan(2, 1, 63, 1, 0));
+        scans.push(ScanInfo::ac_scan(1, 1, 63, 1, 0));
+
+        // 10. Luma bottom bit comes last since it's usually largest scan
+        scans.push(ScanInfo::ac_scan(0, 1, 63, 1, 0));
+    }
+
+    scans
+}
+
 /// Generate mozjpeg-optimized progressive scan script.
 ///
 /// This is the scan script used when optimize_scans is enabled in mozjpeg.

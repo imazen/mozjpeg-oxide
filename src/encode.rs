@@ -991,9 +991,10 @@ impl Encoder {
                     &ac_chroma_derived,
                 )?
             } else {
-                // Use simple progressive scan script (4 scans: DC + full AC per component)
-                // This matches C mozjpeg's jpeg_simple_progression() behavior
-                // For max compression, use optimize_scans=true which tries multiple scripts
+                // Use minimal 4-scan script (DC + full AC per component)
+                // C mozjpeg's jpeg_simple_progression uses 10-scan SA, but that requires
+                // per-scan Huffman tables to be efficient. With global tables, the simpler
+                // 4-scan script produces smaller files. Use optimize_scans=true for SA.
                 generate_minimal_progressive_scans(3)
             };
 

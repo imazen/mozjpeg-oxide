@@ -24,7 +24,15 @@ use mozjpeg_oxide::scan_optimize::{generate_search_scans, ScanSearchConfig};
 /// - 20 chroma frequency split scans (5 pairs × 2 components)
 #[test]
 fn test_scan_generation_structure() {
-    let config = ScanSearchConfig::default();
+    // Use explicit config matching C mozjpeg's defaults (with SA enabled)
+    // Note: ScanSearchConfig::default() currently has al_max=0 to avoid
+    // refinement scan bugs. This test verifies the SA scan generation logic.
+    let config = ScanSearchConfig {
+        al_max_luma: 3,
+        al_max_chroma: 2,
+        frequency_splits: vec![2, 8, 5, 12, 18],
+        dc_scan_opt_mode: 0,
+    };
     let rust_scans = generate_search_scans(3, &config);
 
     // Layout (matching C mozjpeg exactly):

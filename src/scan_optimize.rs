@@ -25,8 +25,12 @@ pub struct ScanSearchConfig {
 impl Default for ScanSearchConfig {
     fn default() -> Self {
         Self {
-            al_max_luma: 3,
-            al_max_chroma: 2,
+            // Disable successive approximation for now.
+            // Our AC refinement encoding has bugs that cause "failed to decode huffman code"
+            // errors. Setting al_max to 0 avoids generating refinement scans (Ah > 0).
+            // TODO: Fix AC refinement encoding and restore al_max_luma=3, al_max_chroma=2
+            al_max_luma: 0,
+            al_max_chroma: 0,
             frequency_splits: vec![2, 8, 5, 12, 18],
             dc_scan_opt_mode: 0,
         }
@@ -618,9 +622,19 @@ impl ScanSelector {
 mod tests {
     use super::*;
 
+    /// Config matching C mozjpeg's full SA search (for testing internal algorithm)
+    fn c_mozjpeg_config() -> ScanSearchConfig {
+        ScanSearchConfig {
+            al_max_luma: 3,
+            al_max_chroma: 2,
+            frequency_splits: vec![2, 8, 5, 12, 18],
+            dc_scan_opt_mode: 0,
+        }
+    }
+
     #[test]
     fn test_generate_search_scans_ycbcr() {
-        let config = ScanSearchConfig::default();
+        let config = c_mozjpeg_config();
         let scans = generate_search_scans(3, &config);
         // Layout (matching C mozjpeg exactly):
         // Luma: DC(1) + base(2) + 3*al_max_luma(9) + full(1) + 2*num_splits(10) = 23
@@ -635,14 +649,14 @@ mod tests {
 
     #[test]
     fn test_generate_search_scans_grayscale() {
-        let config = ScanSearchConfig::default();
+        let config = c_mozjpeg_config();
         let scans = generate_search_scans(1, &config);
         assert_eq!(scans.len(), 23, "Grayscale should generate 23 scans");
     }
 
     #[test]
     fn test_scan_selector_defaults() {
-        let config = ScanSearchConfig::default();
+        let config = c_mozjpeg_config();
         let selector = ScanSelector::new(3, config.clone());
 
         // With all equal scan sizes, should pick Al=0 and no frequency split
@@ -656,7 +670,7 @@ mod tests {
 
     #[test]
     fn test_scan_selector_prefers_smaller() {
-        let config = ScanSearchConfig::default();
+        let config = c_mozjpeg_config();
         let selector = ScanSelector::new(3, config);
 
         // Test the Al selection algorithm (matching C mozjpeg's greedy search)
@@ -705,7 +719,7 @@ mod tests {
 
     #[test]
     fn test_build_final_scans() {
-        let config = ScanSearchConfig::default();
+        let config = c_mozjpeg_config();
         let result = ScanSearchResult {
             best_al_luma: 1,
             best_al_chroma: 0,
@@ -728,7 +742,7 @@ mod tests {
 
     #[test]
     fn test_chroma_dc_interleaving_preference() {
-        let config = ScanSearchConfig::default();
+        let config = c_mozjpeg_config();
         let selector = ScanSelector::new(3, config);
 
         // Make interleaved DC cheaper
@@ -759,7 +773,7 @@ mod tests {
 
     #[test]
     fn test_frequency_split_selection() {
-        let config = ScanSearchConfig::default();
+        let config = c_mozjpeg_config();
         let selector = ScanSelector::new(3, config.clone());
 
         // New layout (matching C mozjpeg):
@@ -789,7 +803,7 @@ mod tests {
 
     #[test]
     fn test_grayscale_scan_generation() {
-        let config = ScanSearchConfig::default();
+        let config = c_mozjpeg_config();
         let scans = generate_search_scans(1, &config);
 
         // Verify expected structure for grayscale
@@ -812,7 +826,7 @@ mod tests {
 
     #[test]
     fn test_build_final_scans_with_refinement() {
-        let config = ScanSearchConfig::default();
+        let config = c_mozjpeg_config();
         let result = ScanSearchResult {
             best_al_luma: 2, // Use Al=2, which needs refinement scans
             best_al_chroma: 1,
@@ -848,7 +862,7 @@ mod tests {
     #[test]
     fn test_scan_layout_structure() {
         // Verify the scan layout structure matches C mozjpeg exactly
-        let config = ScanSearchConfig::default();
+        let config = c_mozjpeg_config();
         let scans = generate_search_scans(3, &config);
 
         // Scan 0: DC all components

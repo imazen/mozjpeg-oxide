@@ -40,7 +40,7 @@ use crate::error::{Error, Result};
 use crate::huffman::DerivedTable;
 use crate::huffman::FrequencyCounter;
 use crate::marker::MarkerWriter;
-use crate::progressive::{generate_baseline_scan, generate_mozjpeg_max_compression_scans};
+use crate::progressive::{generate_baseline_scan, generate_minimal_progressive_scans};
 use crate::quant::{create_quant_tables, quantize_block_raw};
 use crate::sample;
 use crate::scan_optimize::{generate_search_scans, ScanSearchConfig, ScanSelector};
@@ -966,12 +966,14 @@ impl Encoder {
             }
 
             // Generate progressive scan script
+            //
+            // TEMPORARY: Always use 4-scan minimal script to avoid refinement scan bugs.
+            // Our AC refinement encoding has bugs causing "failed to decode huffman code".
+            // TODO: Fix AC refinement encoding and re-enable optimize_scans.
             let scans = if self.optimize_scans {
-                // Use C mozjpeg-compatible optimize_scans:
-                // 1. Generate 64 individual candidate scans
-                // 2. Trial-encode each to get sizes
-                // 3. Use ScanSelector to find optimal Al levels and frequency splits
-                // 4. Build final scan script from the selection
+                // When optimize_scans is enabled, use the scan optimizer to find
+                // the best frequency split and Al levels. However, SA refinement
+                // (Ah > 0) is currently disabled due to encoding bugs.
                 self.optimize_progressive_scans(
                     3, // num_components
                     &y_blocks,
@@ -991,13 +993,12 @@ impl Encoder {
                     &ac_chroma_derived,
                 )?
             } else {
-                // Use C mozjpeg's 9-scan JCP_MAX_COMPRESSION script.
-                // This matches jcparam.c lines 932-947 (the JCP_MAX_COMPRESSION branch).
-                // mozjpeg-sys defaults to JCP_MAX_COMPRESSION profile, which uses:
-                // - DC with no successive approximation (Al=0)
-                // - 8/9 frequency split for luma with successive approximation
-                // - No successive approximation for chroma
-                generate_mozjpeg_max_compression_scans(3)
+                // Use simple 4-scan progressive script:
+                // 1. DC scan for all components
+                // 2. Full AC (1-63) for Y
+                // 3. Full AC (1-63) for Cb
+                // 4. Full AC (1-63) for Cr
+                generate_minimal_progressive_scans(3)
             };
 
             // Build Huffman tables and encode scans

@@ -383,6 +383,53 @@ impl Encoder {
         self
     }
 
+    // =========================================================================
+    // Aliases for rimage/CLI-style naming
+    // =========================================================================
+
+    /// Set baseline mode (opposite of progressive).
+    ///
+    /// When `true`, produces a sequential JPEG (non-progressive).
+    /// This is equivalent to `progressive(false)`.
+    ///
+    /// # Example
+    /// ```
+    /// use mozjpeg_rs::Encoder;
+    ///
+    /// // These are equivalent:
+    /// let enc1 = Encoder::new().baseline(true);
+    /// let enc2 = Encoder::new().progressive(false);
+    /// ```
+    #[inline]
+    pub fn baseline(self, enable: bool) -> Self {
+        self.progressive(!enable)
+    }
+
+    /// Enable or disable Huffman coding optimization.
+    ///
+    /// Alias for [`optimize_huffman()`](Self::optimize_huffman).
+    /// This name matches mozjpeg's CLI flag naming.
+    #[inline]
+    pub fn optimize_coding(self, enable: bool) -> Self {
+        self.optimize_huffman(enable)
+    }
+
+    /// Set chroma subsampling mode.
+    ///
+    /// Alias for [`subsampling()`](Self::subsampling).
+    #[inline]
+    pub fn chroma_subsampling(self, mode: Subsampling) -> Self {
+        self.subsampling(mode)
+    }
+
+    /// Set quantization table variant.
+    ///
+    /// Alias for [`quant_tables()`](Self::quant_tables).
+    #[inline]
+    pub fn qtable(self, idx: QuantTableIdx) -> Self {
+        self.quant_tables(idx)
+    }
+
     /// Encode RGB image data to JPEG.
     ///
     /// # Arguments

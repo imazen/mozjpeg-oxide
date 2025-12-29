@@ -142,6 +142,39 @@ All combinations of settings are supported and tested:
 - `Encoder::max_compression()` - Above + Progressive + optimize_scans
 - `Encoder::fastest()` - No optimizations (libjpeg-turbo compatible)
 
+### Quantization Tables
+
+| Table | Description |
+|-------|-------------|
+| `Robidoux` | **Default.** Nicolas Robidoux's psychovisual tables (used by ImageMagick) |
+| `JpegAnnexK` | Standard JPEG tables (libjpeg default) |
+| `Flat` | Uniform quantization |
+| `MssimTuned` | MSSIM-optimized on Kodak corpus |
+| `PsnrHvsM` | PSNR-HVS-M tuned |
+| `Klein` | Klein, Silverstein, Carney (1992) |
+| `Watson` | DCTune (Watson, Taylor, Borthwick 1997) |
+| `Ahumada` | Ahumada, Watson, Peterson (1993) |
+| `Peterson` | Peterson, Ahumada, Watson (1993) |
+
+```rust
+use mozjpeg_rs::{Encoder, QuantTableIdx};
+
+let jpeg = Encoder::new()
+    .qtable(QuantTableIdx::Robidoux)  // or .quant_tables()
+    .encode_rgb(&pixels, width, height)?;
+```
+
+### Method Aliases
+
+For CLI-style naming (compatible with rimage conventions):
+
+| Alias | Equivalent |
+|-------|------------|
+| `.baseline(true)` | `.progressive(false)` |
+| `.optimize_coding(true)` | `.optimize_huffman(true)` |
+| `.chroma_subsampling(mode)` | `.subsampling(mode)` |
+| `.qtable(idx)` | `.quant_tables(idx)` |
+
 ## Performance
 
 Benchmarked on 512x768 image, 20 iterations, release mode:
@@ -191,7 +224,7 @@ With `optimize_scans=true` (enabled in `max_compression()`), mozjpeg-rs matches 
 For exact byte-identical output to C mozjpeg, you would need to:
 1. Use baseline (non-progressive) mode
 2. Match all encoder settings exactly
-3. Use the same quantization tables (ImageMagick tables, index 3)
+3. Use the same quantization tables (Robidoux/ImageMagick tables)
 
 The FFI comparison tests in `tests/ffi_comparison.rs` verify component-level parity.
 

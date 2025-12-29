@@ -86,14 +86,15 @@ pub const NUM_QUANT_TABLE_VARIANTS: usize = 9;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum QuantTableIdx {
-    /// JPEG Annex K (standard)
+    /// JPEG Annex K (standard libjpeg tables)
     JpegAnnexK = 0,
     /// Flat (uniform quantization)
     Flat = 1,
     /// MSSIM-tuned on Kodak image set
     MssimTuned = 2,
-    /// ImageMagick default (mozjpeg default for MAX_COMPRESSION)
-    ImageMagick = 3,
+    /// Robidoux tables (Nicolas Robidoux, used by ImageMagick and mozjpeg default)
+    /// Psychovisually optimized for high-frequency detail preservation.
+    Robidoux = 3,
     /// PSNR-HVS-M tuned
     PsnrHvsM = 4,
     /// Klein, Silverstein, Carney (1992)
@@ -107,6 +108,10 @@ pub enum QuantTableIdx {
 }
 
 impl QuantTableIdx {
+    /// Alias: ImageMagick tables (same as Robidoux)
+    #[allow(non_upper_case_globals)]
+    pub const ImageMagick: Self = Self::Robidoux;
+
     /// Convert a u8 value to a QuantTableIdx.
     ///
     /// Returns `None` if the value is out of range (0-8).
@@ -115,7 +120,7 @@ impl QuantTableIdx {
             0 => Some(Self::JpegAnnexK),
             1 => Some(Self::Flat),
             2 => Some(Self::MssimTuned),
-            3 => Some(Self::ImageMagick),
+            3 => Some(Self::Robidoux),
             4 => Some(Self::PsnrHvsM),
             5 => Some(Self::Klein),
             6 => Some(Self::Watson),
@@ -147,7 +152,7 @@ pub const STD_LUMINANCE_QUANT_TBL: [[u16; DCTSIZE2]; NUM_QUANT_TABLE_VARIANTS] =
         55, 26, 26, 26, 30, 46, 87, 86, 66, 31, 33, 36, 40, 46, 96, 100, 73, 40, 35, 46, 62, 81,
         100, 111, 91, 46, 66, 76, 86, 102, 121, 120, 101, 68, 90, 90, 96, 113, 102, 105, 103,
     ],
-    // 3: ImageMagick (mozjpeg default for MAX_COMPRESSION)
+    // 3: Robidoux (Nicolas Robidoux, used by ImageMagick and mozjpeg)
     [
         16, 16, 16, 18, 25, 37, 56, 85, 16, 17, 20, 27, 34, 40, 53, 75, 16, 20, 24, 31, 43, 62, 91,
         135, 18, 27, 31, 40, 53, 74, 106, 156, 25, 34, 43, 53, 69, 94, 131, 189, 37, 40, 62, 74,

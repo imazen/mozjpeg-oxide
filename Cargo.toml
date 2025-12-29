@@ -1,13 +1,13 @@
 [package]
 name = "mozjpeg-rs"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 rust-version = "1.89.0"
 license = "BSD-3-Clause"
-repository = "https://github.com/imazen/mozjpeg-oxide"
+repository = "https://github.com/imazen/mozjpeg-rs"
 description = "Pure Rust JPEG encoder based on Mozilla's mozjpeg with trellis quantization"
-homepage = "https://github.com/imazen/mozjpeg-oxide"
-documentation = "https://docs.rs/mozjpeg-oxide"
+homepage = "https://github.com/imazen/mozjpeg-rs"
+documentation = "https://docs.rs/mozjpeg-rs"
 readme = "README.md"
 keywords = ["jpeg", "encoder", "mozjpeg", "compression", "image"]
 categories = ["encoding", "multimedia::images"]

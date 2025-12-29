@@ -4,7 +4,7 @@
 //! Some tests require corpus images and are skipped if unavailable.
 
 use dssim::Dssim;
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use std::io::Cursor;
 
 /// Helper to decode JPEG and return pixels
@@ -360,7 +360,7 @@ fn test_all_encoder_permutations_work() {
 #[cfg(feature = "ffi-test")]
 mod corpus_tests {
     use super::*;
-    use mozjpeg_oxide::corpus::kodak_dir;
+    use mozjpeg_rs::corpus::kodak_dir;
 
     /// Test 4:4:4 subsampling produces reasonable output compared to C mozjpeg.
     #[test]

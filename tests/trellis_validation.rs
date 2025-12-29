@@ -4,7 +4,7 @@
 //! Uses bundled test image if corpus not available.
 
 use dssim::Dssim;
-use mozjpeg_oxide::corpus::{bundled_test_image, kodak_dir};
+use mozjpeg_rs::corpus::{bundled_test_image, kodak_dir};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
@@ -24,13 +24,13 @@ fn test_trellis_progressive_comparison() {
     let (rgb_data, width, height) = load_png(&path).expect("Failed to load test image");
 
     // Rust with max_compression (progressive + trellis)
-    let rust_progressive = mozjpeg_oxide::Encoder::max_compression()
+    let rust_progressive = mozjpeg_rs::Encoder::max_compression()
         .quality(75)
         .encode_rgb(&rgb_data, width, height)
         .expect("Rust progressive encoding failed");
 
     // Rust baseline with trellis enabled (default)
-    let rust_baseline = mozjpeg_oxide::Encoder::new()
+    let rust_baseline = mozjpeg_rs::Encoder::new()
         .quality(75)
         .encode_rgb(&rgb_data, width, height)
         .expect("Rust baseline encoding failed");
@@ -152,12 +152,12 @@ fn test_small_image_encoding() {
         }
     }
 
-    let progressive = mozjpeg_oxide::Encoder::max_compression()
+    let progressive = mozjpeg_rs::Encoder::max_compression()
         .quality(85)
         .encode_rgb(&rgb, width, height)
         .expect("Progressive failed");
 
-    let baseline = mozjpeg_oxide::Encoder::new()
+    let baseline = mozjpeg_rs::Encoder::new()
         .quality(85)
         .encode_rgb(&rgb, width, height)
         .expect("Baseline failed");

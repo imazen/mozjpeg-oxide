@@ -5,7 +5,7 @@
 //! Usage:
 //!   cargo run --release --example visual_compare
 
-use mozjpeg_oxide::Encoder;
+use mozjpeg_rs::Encoder;
 use mozjpeg_sys::*;
 use std::fs::{self, File};
 use std::io::Write;
@@ -48,7 +48,7 @@ fn main() {
             .progressive(true)
             .optimize_huffman(true)
             .overshoot_deringing(true)
-            .trellis(mozjpeg_oxide::TrellisConfig::default())
+            .trellis(mozjpeg_rs::TrellisConfig::default())
             .encode_rgb(&rgb, width, height)
             .expect("Rust encode failed");
 

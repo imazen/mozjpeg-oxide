@@ -1,6 +1,6 @@
 //! Debug optimize_scans behavior
 
-use mozjpeg_oxide::{Encoder, TrellisConfig};
+use mozjpeg_rs::{Encoder, TrellisConfig};
 use std::fs;
 
 fn main() {

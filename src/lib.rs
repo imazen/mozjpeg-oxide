@@ -14,9 +14,9 @@
 //! The [`Encoder`] struct is the main entry point for encoding images:
 //!
 //! ```no_run
-//! use mozjpeg_oxide::Encoder;
+//! use mozjpeg_rs::Encoder;
 //!
-//! # fn main() -> Result<(), mozjpeg_oxide::Error> {
+//! # fn main() -> Result<(), mozjpeg_rs::Error> {
 //! // RGB pixel data (3 bytes per pixel, row-major order)
 //! let rgb_pixels: Vec<u8> = vec![0; 640 * 480 * 3];
 //!
@@ -49,9 +49,9 @@
 //! ## Advanced Configuration
 //!
 //! ```no_run
-//! use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig, QuantTableIdx};
+//! use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig, QuantTableIdx};
 //!
-//! # fn main() -> Result<(), mozjpeg_oxide::Error> {
+//! # fn main() -> Result<(), mozjpeg_rs::Error> {
 //! # let rgb_pixels: Vec<u8> = vec![0; 100 * 100 * 3];
 //! let jpeg_data = Encoder::new()
 //!     .quality(75)
@@ -69,9 +69,9 @@
 //! ## Grayscale Encoding
 //!
 //! ```no_run
-//! use mozjpeg_oxide::Encoder;
+//! use mozjpeg_rs::Encoder;
 //!
-//! # fn main() -> Result<(), mozjpeg_oxide::Error> {
+//! # fn main() -> Result<(), mozjpeg_rs::Error> {
 //! let gray_pixels: Vec<u8> = vec![128; 100 * 100]; // 1 byte per pixel
 //!
 //! let jpeg_data = Encoder::new()
@@ -84,7 +84,7 @@
 //! ## Writing to a File or Stream
 //!
 //! ```no_run
-//! use mozjpeg_oxide::Encoder;
+//! use mozjpeg_rs::Encoder;
 //! use std::fs::File;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -101,9 +101,9 @@
 //! ## Metadata
 //!
 //! ```no_run
-//! use mozjpeg_oxide::{Encoder, PixelDensity};
+//! use mozjpeg_rs::{Encoder, PixelDensity};
 //!
-//! # fn main() -> Result<(), mozjpeg_oxide::Error> {
+//! # fn main() -> Result<(), mozjpeg_rs::Error> {
 //! # let rgb_pixels: Vec<u8> = vec![0; 100 * 100 * 3];
 //! # let exif_bytes: Vec<u8> = vec![];
 //! # let icc_profile: Vec<u8> = vec![];
@@ -243,9 +243,9 @@ pub mod corpus;
 /// # Example
 ///
 /// ```no_run
-/// use mozjpeg_oxide::Encoder;
+/// use mozjpeg_rs::Encoder;
 ///
-/// # fn main() -> Result<(), mozjpeg_oxide::Error> {
+/// # fn main() -> Result<(), mozjpeg_rs::Error> {
 /// let pixels: Vec<u8> = vec![0; 640 * 480 * 3];
 ///
 /// let jpeg = Encoder::new()
@@ -264,7 +264,7 @@ pub use encode::{Encode, Encoder, EncodingStream, StreamingEncoder};
 /// # Example
 ///
 /// ```no_run
-/// use mozjpeg_oxide::{Encoder, Error};
+/// use mozjpeg_rs::{Encoder, Error};
 ///
 /// # fn example() {
 /// let result = Encoder::new().encode_rgb(&[], 0, 0);
@@ -281,7 +281,7 @@ pub use error::Error;
 
 /// Result type alias for encoding operations.
 ///
-/// Equivalent to `std::result::Result<T, mozjpeg_oxide::Error>`.
+/// Equivalent to `std::result::Result<T, mozjpeg_rs::Error>`.
 pub use error::Result;
 
 /// Chroma subsampling mode.
@@ -300,9 +300,9 @@ pub use error::Result;
 /// # Example
 ///
 /// ```no_run
-/// use mozjpeg_oxide::{Encoder, Subsampling};
+/// use mozjpeg_rs::{Encoder, Subsampling};
 ///
-/// # fn main() -> Result<(), mozjpeg_oxide::Error> {
+/// # fn main() -> Result<(), mozjpeg_rs::Error> {
 /// # let pixels: Vec<u8> = vec![0; 100 * 100 * 3];
 /// // High quality - no color subsampling
 /// let jpeg = Encoder::new()
@@ -326,9 +326,9 @@ pub use types::Subsampling;
 /// # Example
 ///
 /// ```no_run
-/// use mozjpeg_oxide::{Encoder, PixelDensity};
+/// use mozjpeg_rs::{Encoder, PixelDensity};
 ///
-/// # fn main() -> Result<(), mozjpeg_oxide::Error> {
+/// # fn main() -> Result<(), mozjpeg_rs::Error> {
 /// # let pixels: Vec<u8> = vec![0; 100 * 100 * 3];
 /// // 300 DPI for print
 /// let jpeg = Encoder::new()
@@ -358,9 +358,9 @@ pub use types::DensityUnit;
 /// # Example
 ///
 /// ```no_run
-/// use mozjpeg_oxide::{Encoder, TrellisConfig};
+/// use mozjpeg_rs::{Encoder, TrellisConfig};
 ///
-/// # fn main() -> Result<(), mozjpeg_oxide::Error> {
+/// # fn main() -> Result<(), mozjpeg_rs::Error> {
 /// # let pixels: Vec<u8> = vec![0; 100 * 100 * 3];
 /// // Default trellis settings (enabled by default with Encoder::new())
 /// let jpeg = Encoder::new()
@@ -396,9 +396,9 @@ pub use types::TrellisConfig;
 /// # Example
 ///
 /// ```no_run
-/// use mozjpeg_oxide::{Encoder, QuantTableIdx};
+/// use mozjpeg_rs::{Encoder, QuantTableIdx};
 ///
-/// # fn main() -> Result<(), mozjpeg_oxide::Error> {
+/// # fn main() -> Result<(), mozjpeg_rs::Error> {
 /// # let pixels: Vec<u8> = vec![0; 100 * 100 * 3];
 /// let jpeg = Encoder::new()
 ///     .quant_tables(QuantTableIdx::Flat)

@@ -30,7 +30,7 @@ use super::{
 /// # Example
 ///
 /// ```ignore
-/// use mozjpeg_oxide::Encoder;
+/// use mozjpeg_rs::Encoder;
 ///
 /// // Create streaming encoder
 /// let mut stream = Encoder::streaming()

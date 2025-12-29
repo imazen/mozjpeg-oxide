@@ -5,7 +5,7 @@
 //!
 //! Run with: cargo test --release timing_breakdown -- --nocapture
 
-use mozjpeg_oxide::{
+use mozjpeg_rs::{
     bitstream::BitWriter,
     color,
     consts::{

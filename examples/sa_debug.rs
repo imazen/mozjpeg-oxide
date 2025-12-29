@@ -1,5 +1,5 @@
-use mozjpeg_oxide::progressive::generate_mozjpeg_max_compression_scans;
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::progressive::generate_mozjpeg_max_compression_scans;
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use std::fs::File;
 use std::path::Path;
 

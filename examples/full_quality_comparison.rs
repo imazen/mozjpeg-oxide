@@ -8,7 +8,7 @@ use codec_eval::{
     decode::jpeg_decode_callback, EvalConfig, EvalSession, ImageData, MetricConfig,
     ViewingCondition,
 };
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use std::fs::File;
 use std::path::Path;
 

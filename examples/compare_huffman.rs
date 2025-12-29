@@ -1,6 +1,6 @@
 //! Compare Huffman tables in Rust vs C output
 
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use std::process::Command;
 
 fn main() {

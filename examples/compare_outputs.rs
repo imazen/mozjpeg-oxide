@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo run --example compare_outputs
 
-use mozjpeg_oxide::{Encoder, Subsampling};
+use mozjpeg_rs::{Encoder, Subsampling};
 use std::fs;
 
 fn main() {

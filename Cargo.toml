@@ -1,5 +1,5 @@
 [package]
-name = "mozjpeg-oxide"
+name = "mozjpeg-rs"
 version = "0.2.3"
 edition = "2021"
 rust-version = "1.89.0"

@@ -1,6 +1,6 @@
 //! Full Kodak corpus comparison with explicit trellis settings
 
-use mozjpeg_oxide::{Encoder, TrellisConfig};
+use mozjpeg_rs::{Encoder, TrellisConfig};
 use std::fs;
 use std::path::Path;
 

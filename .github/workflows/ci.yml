@@ -67,19 +67,19 @@ jobs:
 
       - name: Run clippy
         # Only run clippy on main crate lib - sys-local requires local mozjpeg source
-        run: cargo clippy -p mozjpeg-oxide --lib -- -D warnings
+        run: cargo clippy -p mozjpeg-rs --lib -- -D warnings
         # Skip clippy on Windows for now due to potential FFI issues
         if: matrix.os != 'Windows'
 
       - name: Build
         # Only build main crate - sys-local requires local mozjpeg source
-        run: cargo build -p mozjpeg-oxide
+        run: cargo build -p mozjpeg-rs
 
       - name: Build (release)
-        run: cargo build -p mozjpeg-oxide --release
+        run: cargo build -p mozjpeg-rs --release
 
       - name: Run unit tests
-        run: cargo test -p mozjpeg-oxide --lib
+        run: cargo test -p mozjpeg-rs --lib
 
       - name: Run codec comparison tests
         run: cargo test --test codec_comparison
@@ -128,7 +128,7 @@ jobs:
 
       - name: Build documentation
         # Exclude sys-local (requires local mozjpeg C source)
-        run: cargo doc -p mozjpeg-oxide --no-deps
+        run: cargo doc -p mozjpeg-rs --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -144,7 +144,7 @@ jobs:
 
       - name: Build with MSRV
         # Only build main crate - dev dependencies may require newer Rust
-        run: cargo build -p mozjpeg-oxide
+        run: cargo build -p mozjpeg-rs
 
   # Code coverage
   coverage:
@@ -163,7 +163,7 @@ jobs:
 
       - name: Generate coverage report
         # Only run coverage on main crate - sys-local requires local mozjpeg source
-        run: cargo llvm-cov -p mozjpeg-oxide --lib --lcov --output-path lcov.info
+        run: cargo llvm-cov -p mozjpeg-rs --lib --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

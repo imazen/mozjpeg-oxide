@@ -1,6 +1,6 @@
 //! Debug which encoder modes produce decodable JPEGs
 
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use std::fs::File;
 use std::path::Path;
 

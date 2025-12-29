@@ -3,7 +3,7 @@
 //! These tests verify the public API of the encoder.
 
 use dssim::Dssim;
-use mozjpeg_oxide::{Encode, Encoder, StreamingEncoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encode, Encoder, StreamingEncoder, Subsampling, TrellisConfig};
 
 /// Verify JPEG output can be decoded by an external decoder
 #[test]
@@ -215,7 +215,7 @@ fn test_encode_invalid_size() {
 
 #[test]
 fn test_encode_zero_dimensions() {
-    use mozjpeg_oxide::Error;
+    use mozjpeg_rs::Error;
 
     let encoder = Encoder::new();
 

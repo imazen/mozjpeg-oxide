@@ -5,8 +5,8 @@
 //! Run with: cargo bench
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use mozjpeg_oxide::test_encoder::{encode_rust, TestEncoderConfig};
-use mozjpeg_oxide::{Encoder, Subsampling};
+use mozjpeg_rs::test_encoder::{encode_rust, TestEncoderConfig};
+use mozjpeg_rs::{Encoder, Subsampling};
 use mozjpeg_sys::*;
 use std::ptr;
 
@@ -287,8 +287,8 @@ fn bench_subsampling(c: &mut Criterion) {
 
 /// Benchmark DCT implementations (scalar vs SIMD).
 fn bench_dct(c: &mut Criterion) {
-    use mozjpeg_oxide::dct::{forward_dct_8x8, forward_dct_8x8_simd, forward_dct_8x8_transpose};
-    use mozjpeg_oxide::simd::SimdOps;
+    use mozjpeg_rs::dct::{forward_dct_8x8, forward_dct_8x8_simd, forward_dct_8x8_transpose};
+    use mozjpeg_rs::simd::SimdOps;
 
     // Create test data
     let mut samples = [0i16; 64];

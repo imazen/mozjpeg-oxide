@@ -12,7 +12,7 @@
 // That's intentional - these tests only run locally with the C source available.
 #![cfg(feature = "__sys_local_available")]
 
-use mozjpeg_oxide::{color, dct, quant, sample};
+use mozjpeg_rs::{color, dct, quant, sample};
 use sys_local as ffi;
 
 /// Test forward DCT matches C implementation
@@ -324,7 +324,7 @@ fn test_nbits_matches_c() {
 /// Test that Rust encoder produces valid JPEG that decodes correctly
 #[test]
 fn test_rust_encoder_quality() {
-    use mozjpeg_oxide::{Encoder, Subsampling};
+    use mozjpeg_rs::{Encoder, Subsampling};
 
     // Create a simple test image (smooth gradient is easier to compress)
     let width = 64u32;
@@ -372,7 +372,7 @@ fn test_rust_encoder_quality() {
 /// Test Rust encoder at different quality levels (standard qualities)
 #[test]
 fn test_rust_encoder_quality_levels() {
-    use mozjpeg_oxide::{Encoder, Subsampling};
+    use mozjpeg_rs::{Encoder, Subsampling};
 
     let width = 32u32;
     let height = 32u32;
@@ -414,8 +414,8 @@ fn test_rust_encoder_quality_levels() {
 /// implementations to ensure they produce identical results.
 #[test]
 fn test_deringing_matches_c() {
-    use mozjpeg_oxide::consts::JPEG_NATURAL_ORDER;
-    use mozjpeg_oxide::deringing::preprocess_deringing;
+    use mozjpeg_rs::consts::JPEG_NATURAL_ORDER;
+    use mozjpeg_rs::deringing::preprocess_deringing;
 
     const MAX_SAMPLE: i16 = 127; // 255 - 128
 
@@ -539,10 +539,10 @@ fn test_deringing_matches_c() {
 /// must produce identical decisions to C mozjpeg.
 #[test]
 fn test_trellis_matches_c() {
-    use mozjpeg_oxide::consts::{AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, STD_LUMINANCE_QUANT_TBL};
-    use mozjpeg_oxide::huffman::{DerivedTable, HuffTable};
-    use mozjpeg_oxide::trellis::trellis_quantize_block;
-    use mozjpeg_oxide::TrellisConfig;
+    use mozjpeg_rs::consts::{AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, STD_LUMINANCE_QUANT_TBL};
+    use mozjpeg_rs::huffman::{DerivedTable, HuffTable};
+    use mozjpeg_rs::trellis::trellis_quantize_block;
+    use mozjpeg_rs::TrellisConfig;
 
     // Build the AC Huffman table to get code sizes
     let mut htbl = HuffTable::default();
@@ -699,10 +699,10 @@ fn test_trellis_matches_c() {
 /// Uses pseudo-random values that mimic actual DCT output patterns.
 #[test]
 fn test_trellis_matches_c_random() {
-    use mozjpeg_oxide::consts::{AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, STD_LUMINANCE_QUANT_TBL};
-    use mozjpeg_oxide::huffman::{DerivedTable, HuffTable};
-    use mozjpeg_oxide::trellis::trellis_quantize_block;
-    use mozjpeg_oxide::TrellisConfig;
+    use mozjpeg_rs::consts::{AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, STD_LUMINANCE_QUANT_TBL};
+    use mozjpeg_rs::huffman::{DerivedTable, HuffTable};
+    use mozjpeg_rs::trellis::trellis_quantize_block;
+    use mozjpeg_rs::TrellisConfig;
 
     // Build AC Huffman table
     let mut htbl = HuffTable::default();
@@ -812,11 +812,11 @@ fn test_trellis_matches_c_random() {
 /// Test trellis at different quality levels (which affects quantization tables).
 #[test]
 fn test_trellis_matches_c_quality_levels() {
-    use mozjpeg_oxide::consts::{AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, STD_LUMINANCE_QUANT_TBL};
-    use mozjpeg_oxide::huffman::{DerivedTable, HuffTable};
-    use mozjpeg_oxide::quant::quality_to_scale_factor;
-    use mozjpeg_oxide::trellis::trellis_quantize_block;
-    use mozjpeg_oxide::TrellisConfig;
+    use mozjpeg_rs::consts::{AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, STD_LUMINANCE_QUANT_TBL};
+    use mozjpeg_rs::huffman::{DerivedTable, HuffTable};
+    use mozjpeg_rs::quant::quality_to_scale_factor;
+    use mozjpeg_rs::trellis::trellis_quantize_block;
+    use mozjpeg_rs::TrellisConfig;
 
     // Build AC Huffman table
     let mut htbl = HuffTable::default();
@@ -933,10 +933,10 @@ fn test_trellis_matches_c_quality_levels() {
 /// and the trellis optimizes the entire chain of DC values.
 #[test]
 fn test_dc_trellis_matches_c() {
-    use mozjpeg_oxide::consts::{DCTSIZE2, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES};
-    use mozjpeg_oxide::huffman::{DerivedTable, HuffTable};
-    use mozjpeg_oxide::trellis::dc_trellis_optimize;
-    use mozjpeg_oxide::TrellisConfig;
+    use mozjpeg_rs::consts::{DCTSIZE2, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES};
+    use mozjpeg_rs::huffman::{DerivedTable, HuffTable};
+    use mozjpeg_rs::trellis::dc_trellis_optimize;
+    use mozjpeg_rs::TrellisConfig;
 
     // Build the DC Huffman table
     let mut htbl = HuffTable::default();

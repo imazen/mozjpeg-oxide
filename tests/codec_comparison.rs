@@ -4,7 +4,7 @@
 //! quality levels, encoding modes, and test images.
 //!
 //! **IMPORTANT**: All Rust vs C comparisons use the unified test_encoder API
-//! to ensure identical encoder settings. See `mozjpeg_oxide::test_encoder`.
+//! to ensure identical encoder settings. See `mozjpeg_rs::test_encoder`.
 //!
 //! **Quality Metrics**: Uses DSSIM (structural dissimilarity) instead of PSNR.
 //! PSNR is unreliable for perceptual quality comparison. DSSIM thresholds:
@@ -19,8 +19,8 @@
 use codec_eval::{EvalConfig, EvalSession, ImageData, MetricConfig, ViewingCondition};
 
 use dssim::Dssim;
-use mozjpeg_oxide::test_encoder::{encode_rust, TestEncoderConfig};
-use mozjpeg_oxide::Subsampling;
+use mozjpeg_rs::test_encoder::{encode_rust, TestEncoderConfig};
+use mozjpeg_rs::Subsampling;
 
 /// Encode using Rust with settings matching C mozjpeg baseline (Huffman opt only).
 /// This enables fair parity comparison - both implementations use same settings.
@@ -687,19 +687,19 @@ fn test_single_mcu_progressive() {
     let quality = 75;
     let image = create_photo_like_image(width, height);
 
-    let rust_base = mozjpeg_oxide::Encoder::new()
+    let rust_base = mozjpeg_rs::Encoder::new()
         .quality(quality)
-        .subsampling(mozjpeg_oxide::Subsampling::S420)
+        .subsampling(mozjpeg_rs::Subsampling::S420)
         .progressive(false)
-        .trellis(mozjpeg_oxide::TrellisConfig::disabled())
+        .trellis(mozjpeg_rs::TrellisConfig::disabled())
         .encode_rgb(&image, width, height)
         .expect("Rust baseline failed");
 
-    let rust_prog = mozjpeg_oxide::Encoder::new()
+    let rust_prog = mozjpeg_rs::Encoder::new()
         .quality(quality)
-        .subsampling(mozjpeg_oxide::Subsampling::S420)
+        .subsampling(mozjpeg_rs::Subsampling::S420)
         .progressive(true)
-        .trellis(mozjpeg_oxide::TrellisConfig::disabled())
+        .trellis(mozjpeg_rs::TrellisConfig::disabled())
         .encode_rgb(&image, width, height)
         .expect("Rust progressive failed");
 
@@ -745,19 +745,19 @@ fn test_progressive_444_subsampling() {
     let quality = 75;
     let image = create_photo_like_image(width, height);
 
-    let rust_base = mozjpeg_oxide::Encoder::new()
+    let rust_base = mozjpeg_rs::Encoder::new()
         .quality(quality)
-        .subsampling(mozjpeg_oxide::Subsampling::S444)
+        .subsampling(mozjpeg_rs::Subsampling::S444)
         .progressive(false)
-        .trellis(mozjpeg_oxide::TrellisConfig::disabled())
+        .trellis(mozjpeg_rs::TrellisConfig::disabled())
         .encode_rgb(&image, width, height)
         .expect("Rust baseline failed");
 
-    let rust_prog = mozjpeg_oxide::Encoder::new()
+    let rust_prog = mozjpeg_rs::Encoder::new()
         .quality(quality)
-        .subsampling(mozjpeg_oxide::Subsampling::S444)
+        .subsampling(mozjpeg_rs::Subsampling::S444)
         .progressive(true)
-        .trellis(mozjpeg_oxide::TrellisConfig::disabled())
+        .trellis(mozjpeg_rs::TrellisConfig::disabled())
         .encode_rgb(&image, width, height)
         .expect("Rust progressive failed");
 
@@ -804,19 +804,19 @@ fn test_progressive_mcu_bug() {
     // First test: solid color image (should have minimal AC coefficients)
     println!("--- Test 1: Solid color image ---");
     let solid_image: Vec<u8> = vec![128; 32 * 16 * 3]; // Gray
-    let solid_prog = mozjpeg_oxide::Encoder::new()
+    let solid_prog = mozjpeg_rs::Encoder::new()
         .quality(75)
-        .subsampling(mozjpeg_oxide::Subsampling::S420)
+        .subsampling(mozjpeg_rs::Subsampling::S420)
         .progressive(true)
-        .trellis(mozjpeg_oxide::TrellisConfig::disabled())
+        .trellis(mozjpeg_rs::TrellisConfig::disabled())
         .encode_rgb(&solid_image, 32, 16)
         .expect("Rust progressive failed");
 
-    let solid_base = mozjpeg_oxide::Encoder::new()
+    let solid_base = mozjpeg_rs::Encoder::new()
         .quality(75)
-        .subsampling(mozjpeg_oxide::Subsampling::S420)
+        .subsampling(mozjpeg_rs::Subsampling::S420)
         .progressive(false)
-        .trellis(mozjpeg_oxide::TrellisConfig::disabled())
+        .trellis(mozjpeg_rs::TrellisConfig::disabled())
         .encode_rgb(&solid_image, 32, 16)
         .expect("Rust baseline failed");
 
@@ -842,12 +842,12 @@ fn test_progressive_mcu_bug() {
     let image = create_photo_like_image(width, height);
 
     // Rust progressive (no trellis to isolate the issue)
-    let rust_prog = mozjpeg_oxide::Encoder::new()
+    let rust_prog = mozjpeg_rs::Encoder::new()
         .quality(quality)
-        .subsampling(mozjpeg_oxide::Subsampling::S420)
+        .subsampling(mozjpeg_rs::Subsampling::S420)
         .progressive(true)
         .optimize_huffman(false) // Simpler to debug
-        .trellis(mozjpeg_oxide::TrellisConfig::disabled())
+        .trellis(mozjpeg_rs::TrellisConfig::disabled())
         .encode_rgb(&image, width, height)
         .expect("Rust progressive failed");
 
@@ -855,12 +855,12 @@ fn test_progressive_mcu_bug() {
     let c_prog = c_encode(&image, width, height, quality, true);
 
     // Rust baseline (should be correct)
-    let rust_base = mozjpeg_oxide::Encoder::new()
+    let rust_base = mozjpeg_rs::Encoder::new()
         .quality(quality)
-        .subsampling(mozjpeg_oxide::Subsampling::S420)
+        .subsampling(mozjpeg_rs::Subsampling::S420)
         .progressive(false)
         .optimize_huffman(false)
-        .trellis(mozjpeg_oxide::TrellisConfig::disabled())
+        .trellis(mozjpeg_rs::TrellisConfig::disabled())
         .encode_rgb(&image, width, height)
         .expect("Rust baseline failed");
 
@@ -1064,11 +1064,11 @@ fn test_progressive_mcu_bug() {
     ] {
         let test_img = create_photo_like_image(w, h);
 
-        let r = mozjpeg_oxide::Encoder::new()
+        let r = mozjpeg_rs::Encoder::new()
             .quality(75)
-            .subsampling(mozjpeg_oxide::Subsampling::S420)
+            .subsampling(mozjpeg_rs::Subsampling::S420)
             .progressive(true)
-            .trellis(mozjpeg_oxide::TrellisConfig::disabled())
+            .trellis(mozjpeg_rs::TrellisConfig::disabled())
             .encode_rgb(&test_img, w, h)
             .expect("Rust failed");
 
@@ -1113,9 +1113,9 @@ fn test_subsampling_modes() {
     let image = create_photo_like_image(width, height);
 
     let modes = [
-        (mozjpeg_oxide::Subsampling::S444, "4:4:4"),
-        (mozjpeg_oxide::Subsampling::S422, "4:2:2"),
-        (mozjpeg_oxide::Subsampling::S420, "4:2:0"),
+        (mozjpeg_rs::Subsampling::S444, "4:4:4"),
+        (mozjpeg_rs::Subsampling::S422, "4:2:2"),
+        (mozjpeg_rs::Subsampling::S420, "4:2:0"),
     ];
 
     println!(
@@ -1124,7 +1124,7 @@ fn test_subsampling_modes() {
     );
 
     for (subsampling, name) in modes {
-        let rust_encoded = mozjpeg_oxide::Encoder::new()
+        let rust_encoded = mozjpeg_rs::Encoder::new()
             .quality(quality)
             .subsampling(subsampling)
             .progressive(false) // Use baseline which works

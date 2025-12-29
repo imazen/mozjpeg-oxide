@@ -4,7 +4,7 @@
 //! JPEGs with reasonable quality characteristics.
 
 use dssim::Dssim;
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 
 /// Test that encoded JPEGs are valid and decodable across multiple configurations.
 #[test]

@@ -3,8 +3,8 @@
 //! This test compares file sizes at Q75 with 4:4:4 subsampling.
 //! Requires the Kodak corpus - run `./scripts/fetch-corpus.sh` first.
 
-use mozjpeg_oxide::corpus::{kodak_dir, png_files_in_dir};
-use mozjpeg_oxide::Subsampling;
+use mozjpeg_rs::corpus::{kodak_dir, png_files_in_dir};
+use mozjpeg_rs::Subsampling;
 use std::fs::File;
 use std::path::Path;
 
@@ -38,7 +38,7 @@ fn test_444_subsampling_corpus() {
         };
 
         // Rust encoder with 4:4:4
-        let rust_jpeg = mozjpeg_oxide::Encoder::new()
+        let rust_jpeg = mozjpeg_rs::Encoder::new()
             .quality(75)
             .subsampling(Subsampling::S444)
             .encode_rgb(&rgb_data, width, height)

@@ -1,6 +1,6 @@
 //! Comprehensive comparison: Rust vs C mozjpeg with matching settings
 
-use mozjpeg_oxide::{Encoder, TrellisConfig};
+use mozjpeg_rs::{Encoder, TrellisConfig};
 use std::fs;
 
 fn main() {

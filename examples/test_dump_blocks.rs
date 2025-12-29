@@ -18,16 +18,16 @@ fn main() {
     }
 
     // Encode and save baseline
-    let baseline = mozjpeg_oxide::Encoder::new()
+    let baseline = mozjpeg_rs::Encoder::new()
         .quality(85)
-        .subsampling(mozjpeg_oxide::Subsampling::S444)
+        .subsampling(mozjpeg_rs::Subsampling::S444)
         .encode_rgb(&rgb_data, width, height)
         .unwrap();
 
     // Encode and save progressive
-    let progressive = mozjpeg_oxide::Encoder::max_compression()
+    let progressive = mozjpeg_rs::Encoder::max_compression()
         .quality(85)
-        .subsampling(mozjpeg_oxide::Subsampling::S444)
+        .subsampling(mozjpeg_rs::Subsampling::S444)
         .encode_rgb(&rgb_data, width, height)
         .unwrap();
 

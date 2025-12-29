@@ -1,7 +1,7 @@
 //! Compare image quality metrics between Rust and C mozjpeg
 
 use dssim::Dssim;
-use mozjpeg_oxide::{Encoder, TrellisConfig};
+use mozjpeg_rs::{Encoder, TrellisConfig};
 use rgb::RGB8;
 use std::fs;
 use std::path::Path;

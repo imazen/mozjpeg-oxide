@@ -1,6 +1,6 @@
 //! Investigate the non-trellis path gap (Rust 1.7-4.5% larger than C)
 
-use mozjpeg_oxide::{Encoder, TrellisConfig};
+use mozjpeg_rs::{Encoder, TrellisConfig};
 use std::collections::HashMap;
 use std::fs;
 

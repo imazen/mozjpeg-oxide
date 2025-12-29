@@ -3,8 +3,8 @@
 //! These tests verify that our Rust port produces identical results to the
 //! original C implementation at each layer.
 
-use mozjpeg_oxide::consts::{DCTSIZE2, STD_CHROMINANCE_QUANT_TBL, STD_LUMINANCE_QUANT_TBL};
-use mozjpeg_oxide::quant::quality_to_scale_factor;
+use mozjpeg_rs::consts::{DCTSIZE2, STD_CHROMINANCE_QUANT_TBL, STD_LUMINANCE_QUANT_TBL};
+use mozjpeg_rs::quant::quality_to_scale_factor;
 
 /// Test that our quality_to_scale_factor matches mozjpeg's jpeg_quality_scaling.
 #[test]
@@ -164,7 +164,7 @@ fn test_all_quality_levels() {
 /// characteristics than C mozjpeg. This test documents the current state.
 #[test]
 fn test_rust_vs_c_mozjpeg_encoder() {
-    use mozjpeg_oxide::{Encoder, Subsampling};
+    use mozjpeg_rs::{Encoder, Subsampling};
 
     // Create a test image (64x64 gradient)
     let width = 64u32;

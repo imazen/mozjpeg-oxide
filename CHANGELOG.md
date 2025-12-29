@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2024-12-27
 
 ### Added
-- Initial release of mozjpeg-oxide
+- Initial release of mozjpeg-rs
 - Pure Rust JPEG encoder based on Mozilla's mozjpeg
 - **Trellis quantization** - Rate-distortion optimized AC and DC coefficient selection
 - **Progressive JPEG encoding** - Multi-scan with DC-first, AC-band progression
@@ -43,5 +43,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Platforms: Linux, macOS, Windows (x64 and ARM64)
 - Output compatible with all standard JPEG decoders
 
-[Unreleased]: https://github.com/imazen/mozjpeg-oxide/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/imazen/mozjpeg-oxide/releases/tag/v0.1.0
+[Unreleased]: https://github.com/imazen/mozjpeg-rs/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/imazen/mozjpeg-rs/releases/tag/v0.1.0

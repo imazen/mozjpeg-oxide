@@ -17,7 +17,7 @@ use codec_eval::{
     decode::jpeg_decode_callback, EvalConfig, EvalSession, ImageData, MetricConfig,
     ViewingCondition,
 };
-use mozjpeg_oxide::Encoder;
+use mozjpeg_rs::Encoder;
 use mozjpeg_sys::*;
 use std::fs::{self, File};
 use std::io::Write;
@@ -172,7 +172,7 @@ fn main() {
             let width = image.width() as u32;
             let height = image.height() as u32;
             let quality = request.quality as u8;
-            encode_rust(&rgb, width, height, quality).map_err(|e: mozjpeg_oxide::Error| {
+            encode_rust(&rgb, width, height, quality).map_err(|e: mozjpeg_rs::Error| {
                 codec_eval::Error::Codec {
                     codec: "rust".to_string(),
                     message: e.to_string(),
@@ -315,8 +315,8 @@ fn encode_rust(
     width: u32,
     height: u32,
     quality: u8,
-) -> Result<Vec<u8>, mozjpeg_oxide::Error> {
-    use mozjpeg_oxide::TrellisConfig;
+) -> Result<Vec<u8>, mozjpeg_rs::Error> {
+    use mozjpeg_rs::TrellisConfig;
 
     // Use settings that match C mozjpeg configuration:
     // - Progressive mode with standard scans

@@ -2,7 +2,7 @@
 //!
 //! This encodes a single block through AC refinement and compares the output.
 
-use mozjpeg_oxide::{Encoder, Subsampling};
+use mozjpeg_rs::{Encoder, Subsampling};
 use std::fs::File;
 use std::path::Path;
 
@@ -166,7 +166,7 @@ fn main() {
         .quality(85)
         .progressive(true)
         .optimize_huffman(true)
-        .trellis(mozjpeg_oxide::TrellisConfig::disabled())
+        .trellis(mozjpeg_rs::TrellisConfig::disabled())
         .optimize_scans(false)
         .subsampling(Subsampling::S420)
         .encode_rgb(&rgb, w, h)

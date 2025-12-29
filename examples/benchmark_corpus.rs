@@ -5,7 +5,7 @@
 //! Run `./scripts/fetch-corpus.sh` first to download test images,
 //! or set CODEC_CORPUS_DIR to your codec-corpus location.
 
-use mozjpeg_oxide::corpus::all_corpus_dirs;
+use mozjpeg_rs::corpus::all_corpus_dirs;
 use std::fs;
 use std::io::Cursor;
 use std::path::Path;
@@ -154,7 +154,7 @@ fn process_image(path: &Path) -> Result<(usize, usize, f64, f64), Box<dyn std::e
     };
 
     // Encode with Rust mozjpeg
-    let encoder = mozjpeg_oxide::Encoder::new().quality(75);
+    let encoder = mozjpeg_rs::Encoder::new().quality(75);
     let rust_jpeg = encoder.encode_rgb(&rgb_data, width, height)?;
     let rust_size = rust_jpeg.len();
 

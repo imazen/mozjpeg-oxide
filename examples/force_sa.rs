@@ -1,6 +1,6 @@
 //! Force SA script encoding to debug why it produces larger files
-use mozjpeg_oxide::progressive::generate_mozjpeg_max_compression_scans;
-use mozjpeg_oxide::types::ScanInfo;
+use mozjpeg_rs::progressive::generate_mozjpeg_max_compression_scans;
+use mozjpeg_rs::types::ScanInfo;
 use std::fs::File;
 use std::path::Path;
 

@@ -3,9 +3,9 @@
 //! Tests against the Kodak corpus to ensure consistent quality vs C mozjpeg.
 //! Run `./scripts/fetch-corpus.sh` first to download test images.
 
-use mozjpeg_oxide::corpus::all_corpus_dirs;
-use mozjpeg_oxide::test_encoder::{encode_rust, TestEncoderConfig};
-use mozjpeg_oxide::Subsampling;
+use mozjpeg_rs::corpus::all_corpus_dirs;
+use mozjpeg_rs::test_encoder::{encode_rust, TestEncoderConfig};
+use mozjpeg_rs::Subsampling;
 use mozjpeg_sys::*;
 use std::fs;
 use std::io::Cursor;

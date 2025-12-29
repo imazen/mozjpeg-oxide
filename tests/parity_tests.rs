@@ -6,7 +6,7 @@
 //! Expected values are based on C mozjpeg output for the bundled test image.
 
 use dssim::Dssim;
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use rgb::RGB8;
 use std::io::Cursor;
 

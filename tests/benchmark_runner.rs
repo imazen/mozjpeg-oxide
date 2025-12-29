@@ -7,7 +7,7 @@
 //!
 //! Run with: cargo test --test benchmark_runner --release -- --nocapture
 
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use rgb::RGB;
 use serde::{Deserialize, Serialize};
 use std::fs;

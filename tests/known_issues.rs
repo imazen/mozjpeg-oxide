@@ -35,7 +35,7 @@ fn test_progressive_grayscale_encoding() {
     // Create grayscale gradient
     let gray: Vec<u8> = (0..width * height).map(|i| (i % 256) as u8).collect();
 
-    let jpeg = mozjpeg_oxide::Encoder::new()
+    let jpeg = mozjpeg_rs::Encoder::new()
         .quality(80)
         .progressive(true)
         .encode_gray(&gray, width as u32, height as u32)
@@ -89,9 +89,9 @@ fn test_quality_monotonicity() {
     let mut prev_q = 0u8;
 
     for q in qualities {
-        let jpeg = mozjpeg_oxide::Encoder::new()
+        let jpeg = mozjpeg_rs::Encoder::new()
             .quality(q)
-            .subsampling(mozjpeg_oxide::Subsampling::S444)
+            .subsampling(mozjpeg_rs::Subsampling::S444)
             .optimize_huffman(true)
             .encode_rgb(&rgb, width as u32, height as u32)
             .expect("Encoding failed");
@@ -123,9 +123,9 @@ fn test_quality_sizes_for_debugging() {
     println!("Settings: 4:4:4, optimize_huffman=true\n");
 
     for q in [30u8, 50, 70, 85, 95] {
-        let jpeg = mozjpeg_oxide::Encoder::new()
+        let jpeg = mozjpeg_rs::Encoder::new()
             .quality(q)
-            .subsampling(mozjpeg_oxide::Subsampling::S444)
+            .subsampling(mozjpeg_rs::Subsampling::S444)
             .optimize_huffman(true)
             .encode_rgb(&rgb, width as u32, height as u32)
             .expect("Encoding failed");

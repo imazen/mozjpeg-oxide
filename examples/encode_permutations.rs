@@ -8,7 +8,7 @@
 //! Output files are saved to mozjpeg/tests/images/encoded/
 
 use dssim::Dssim;
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use png::ColorType;
 use rgb::RGB;
 use std::fs;

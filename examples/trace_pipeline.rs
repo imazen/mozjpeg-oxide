@@ -2,13 +2,13 @@
 
 #![allow(dead_code)]
 
-use mozjpeg_oxide::consts::{
+use mozjpeg_rs::consts::{
     AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES,
     STD_LUMINANCE_QUANT_TBL,
 };
-use mozjpeg_oxide::huffman::{DerivedTable, HuffTable};
-use mozjpeg_oxide::TrellisConfig;
-use mozjpeg_oxide::{color, dct, deringing, quant, trellis};
+use mozjpeg_rs::huffman::{DerivedTable, HuffTable};
+use mozjpeg_rs::TrellisConfig;
+use mozjpeg_rs::{color, dct, deringing, quant, trellis};
 use std::fs;
 
 fn main() {

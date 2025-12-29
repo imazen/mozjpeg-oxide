@@ -1,4 +1,4 @@
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use std::time::Instant;
 
 fn main() {

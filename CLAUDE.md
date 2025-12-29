@@ -1,4 +1,4 @@
-# mozjpeg-oxide Development Guide
+# mozjpeg-rs Development Guide
 
 ## Development Guidelines
 
@@ -115,7 +115,7 @@ for all image sizes including non-MCU-aligned dimensions with subsampling.
 ### Working Encoder
 The encoder produces valid JPEG files with mozjpeg-quality compression:
 ```rust
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 
 // Default encoding (trellis + Huffman optimization enabled)
 let encoder = Encoder::new().quality(85);
@@ -396,7 +396,7 @@ let encoder = Encoder::fastest().overshoot_deringing(false); // fastest disables
 ## Architecture
 
 ```
-mozjpeg-oxide/                  # Repository root IS the main crate
+mozjpeg-rs/                  # Repository root IS the main crate
 ├── src/
 │   ├── lib.rs                  # Module exports, public API
 │   ├── consts.rs               # Layer 0: Constants, tables, markers
@@ -437,7 +437,7 @@ mozjpeg-oxide/                  # Repository root IS the main crate
 For comparing Rust vs C implementations with guaranteed parameter parity:
 
 ```rust
-use mozjpeg_oxide::test_encoder::{TestEncoderConfig, encode_rust};
+use mozjpeg_rs::test_encoder::{TestEncoderConfig, encode_rust};
 
 // Configuration shared between both implementations
 let config = TestEncoderConfig {
@@ -484,7 +484,7 @@ For extended testing with real images:
 export CODEC_CORPUS_DIR=/path/to/codec-corpus
 ```
 
-The corpus utilities in `mozjpeg_oxide::corpus` handle path resolution:
+The corpus utilities in `mozjpeg_rs::corpus` handle path resolution:
 - Checks `MOZJPEG_CORPUS_DIR` and `CODEC_CORPUS_DIR` environment variables
 - Falls back to `./corpus/` in project root
 - Bundled test images always available at `tests/images/`

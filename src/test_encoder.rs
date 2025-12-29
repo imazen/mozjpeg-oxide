@@ -6,7 +6,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use mozjpeg_oxide::test_encoder::{TestEncoderConfig, encode_rust, encode_c};
+//! use mozjpeg_rs::test_encoder::{TestEncoderConfig, encode_rust, encode_c};
 //!
 //! let config = TestEncoderConfig::baseline();
 //! let rust_jpeg = encode_rust(&rgb, width, height, &config);

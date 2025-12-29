@@ -1,23 +1,23 @@
-# mozjpeg-oxide
+# mozjpeg-rs
 
 Pure Rust JPEG encoder based on Mozilla's [mozjpeg](https://github.com/mozilla/mozjpeg), featuring trellis quantization for optimal compression.
 
-[![Crates.io](https://img.shields.io/crates/v/mozjpeg-oxide.svg)](https://crates.io/crates/mozjpeg-oxide)
-[![Documentation](https://docs.rs/mozjpeg-oxide/badge.svg)](https://docs.rs/mozjpeg-oxide)
-[![CI](https://github.com/imazen/mozjpeg-oxide/actions/workflows/ci.yml/badge.svg)](https://github.com/imazen/mozjpeg-oxide/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/imazen/mozjpeg-oxide/graph/badge.svg)](https://codecov.io/gh/imazen/mozjpeg-oxide)
-[![License](https://img.shields.io/crates/l/mozjpeg-oxide.svg)](LICENSE)
+[![Crates.io](https://img.shields.io/crates/v/mozjpeg-rs.svg)](https://crates.io/crates/mozjpeg-rs)
+[![Documentation](https://docs.rs/mozjpeg-rs/badge.svg)](https://docs.rs/mozjpeg-rs)
+[![CI](https://github.com/imazen/mozjpeg-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/imazen/mozjpeg-rs/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/imazen/mozjpeg-rs/graph/badge.svg)](https://codecov.io/gh/imazen/mozjpeg-rs)
+[![License](https://img.shields.io/crates/l/mozjpeg-rs.svg)](LICENSE)
 
-## Why mozjpeg-oxide?
+## Why mozjpeg-rs?
 
-| | mozjpeg-oxide | C mozjpeg | libjpeg-turbo |
+| | mozjpeg-rs | C mozjpeg | libjpeg-turbo |
 |--|---------------|-----------|---------------|
 | **Language** | Pure Rust | C | C/asm |
 | **Memory safety** | Compile-time guaranteed | Manual | Manual |
 | **Trellis quantization** | Yes | Yes | No |
 | **Build complexity** | `cargo add` | cmake + nasm + C toolchain | cmake + nasm |
 
-**Choose mozjpeg-oxide when you want:**
+**Choose mozjpeg-rs when you want:**
 - Memory-safe JPEG encoding without C dependencies
 - Smaller files than libjpeg-turbo (trellis quantization)
 - Simple integration via Cargo
@@ -79,7 +79,7 @@ Visual quality (SSIMULACRA2, Butteraugli) is virtually identical at all quality 
 ## Usage
 
 ```rust
-use mozjpeg_oxide::{Encoder, Subsampling};
+use mozjpeg_rs::{Encoder, Subsampling};
 
 // Default: trellis quantization + Huffman optimization
 let jpeg = Encoder::new()
@@ -128,20 +128,20 @@ Benchmarked on 512x768 image, 20 iterations, release mode:
 
 ### SIMD Support
 
-mozjpeg-oxide uses `multiversion` for automatic vectorization by default. Optional hand-written SIMD intrinsics are available:
+mozjpeg-rs uses `multiversion` for automatic vectorization by default. Optional hand-written SIMD intrinsics are available:
 
 ```toml
 [dependencies]
-mozjpeg-oxide = { version = "0.2", features = ["simd-intrinsics"] }
+mozjpeg-rs = { version = "0.2", features = ["simd-intrinsics"] }
 ```
 
 In benchmarks, the difference is minimal (~2%) as `multiversion` autovectorization works well for DCT and color conversion.
 
 ## Differences from C mozjpeg
 
-mozjpeg-oxide aims for compatibility with C mozjpeg but has some differences:
+mozjpeg-rs aims for compatibility with C mozjpeg but has some differences:
 
-| Feature | mozjpeg-oxide | C mozjpeg |
+| Feature | mozjpeg-rs | C mozjpeg |
 |---------|---------------|-----------|
 | **Progressive scan script** | Simple 4-scan (or optimize_scans) | 9-scan with successive approximation |
 | **optimize_scans** | Per-scan Huffman tables | Per-scan Huffman tables |
@@ -154,9 +154,9 @@ mozjpeg-oxide aims for compatibility with C mozjpeg but has some differences:
 At quality levels above Q85, there's a small gap (1-3%) due to differences in the progressive scan structure:
 
 - **C mozjpeg** uses a 9-scan successive approximation (SA) script that splits coefficient bits into coarse and fine layers
-- **mozjpeg-oxide** uses a 4-scan script (DC + full AC for each component) with per-scan optimal Huffman tables
+- **mozjpeg-rs** uses a 4-scan script (DC + full AC for each component) with per-scan optimal Huffman tables
 
-With `optimize_scans=true` (enabled in `max_compression()`), mozjpeg-oxide matches or beats C mozjpeg at Q50-Q80.
+With `optimize_scans=true` (enabled in `max_compression()`), mozjpeg-rs matches or beats C mozjpeg at Q50-Q80.
 
 ### Matching C mozjpeg output exactly
 

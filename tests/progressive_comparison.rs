@@ -8,7 +8,7 @@
 //! Uses codec-eval for perceptual quality metrics.
 
 use codec_eval::{decode::jpeg_decode_callback, EvalSession, ImageData, MetricConfig};
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use std::fs::File;
 use std::path::Path;
 
@@ -318,7 +318,7 @@ fn test_progressive_optimized_vs_c() {
 #[test]
 fn test_successive_approximation_scan_structure() {
     // Test that Rust's standard progressive script matches the expected structure
-    use mozjpeg_oxide::progressive::generate_standard_progressive_scans;
+    use mozjpeg_rs::progressive::generate_standard_progressive_scans;
 
     let scans = generate_standard_progressive_scans(3);
 
@@ -391,7 +391,7 @@ fn test_scan_optimization_produces_successive_approximation() {
 
 #[test]
 fn test_compare_scan_scripts() {
-    use mozjpeg_oxide::progressive::{
+    use mozjpeg_rs::progressive::{
         generate_minimal_progressive_scans, generate_optimized_progressive_scans,
         generate_standard_progressive_scans,
     };

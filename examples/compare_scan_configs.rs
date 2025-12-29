@@ -1,6 +1,6 @@
 //! Compare scan configurations between Rust and C mozjpeg outputs
 
-use mozjpeg_oxide::{Encoder, TrellisConfig};
+use mozjpeg_rs::{Encoder, TrellisConfig};
 use std::fs;
 
 #[derive(Debug, Clone)]

@@ -3,7 +3,7 @@
 //! This test compares file sizes between Rust and C mozjpeg encoders
 //! across the full Kodak corpus at multiple quality levels.
 
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use std::fs::File;
 use std::path::Path;
 

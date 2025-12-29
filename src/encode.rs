@@ -12,7 +12,7 @@
 //! # Examples
 //!
 //! ```ignore
-//! use mozjpeg_oxide::Encoder;
+//! use mozjpeg_rs::Encoder;
 //!
 //! // Full-featured batch encoding
 //! let jpeg = Encoder::new()
@@ -318,7 +318,7 @@ impl Encoder {
     ///
     /// # Example
     /// ```
-    /// use mozjpeg_oxide::{Encoder, PixelDensity};
+    /// use mozjpeg_rs::{Encoder, PixelDensity};
     ///
     /// let encoder = Encoder::new()
     ///     .pixel_density(PixelDensity::dpi(300, 300)); // 300 DPI
@@ -2250,7 +2250,7 @@ impl Encoder {
     /// # Example
     ///
     /// ```ignore
-    /// use mozjpeg_oxide::Encoder;
+    /// use mozjpeg_rs::Encoder;
     /// use std::fs::File;
     ///
     /// let file = File::create("output.jpg")?;

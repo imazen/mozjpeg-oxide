@@ -1,6 +1,6 @@
 //! Test progressive encoding with refinement scans.
 
-use mozjpeg_oxide::Encoder;
+use mozjpeg_rs::Encoder;
 
 fn main() {
     let width = 8u32;

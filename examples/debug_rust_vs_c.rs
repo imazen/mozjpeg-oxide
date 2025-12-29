@@ -2,7 +2,7 @@
 //!
 //! Find exactly where the outputs diverge.
 
-use mozjpeg_oxide::{Encoder, Subsampling, TrellisConfig};
+use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use std::fs;
 
 fn main() {

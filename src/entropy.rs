@@ -488,9 +488,6 @@ impl<'a, W: Write> ProgressiveEncoder<'a, W> {
             // Emit ZRL codes for runs of 16+ zeros
             while run >= 16 {
                 let (code, size) = ac_table.get_code(0xF0);
-                if size == 0 {
-                    eprintln!("ERROR: ZRL symbol 0xF0 has no Huffman code!");
-                }
                 self.writer.put_bits(code, size)?;
                 run -= 16;
             }
@@ -789,6 +786,8 @@ pub struct ProgressiveSymbolCounter {
     last_dc_val: [i16; 4],
     /// Accumulated EOB run count
     eobrun: u16,
+    /// Accumulated correction bits count (for flush threshold matching encoder)
+    correction_bits_count: usize,
 }
 
 impl Default for ProgressiveSymbolCounter {
@@ -803,6 +802,7 @@ impl ProgressiveSymbolCounter {
         Self {
             last_dc_val: [0; 4],
             eobrun: 0,
+            correction_bits_count: 0,
         }
     }
 
@@ -810,6 +810,7 @@ impl ProgressiveSymbolCounter {
     pub fn reset(&mut self) {
         self.last_dc_val = [0; 4];
         self.eobrun = 0;
+        self.correction_bits_count = 0;
     }
 
     /// Count DC symbols for a first scan (Ah=0).
@@ -933,7 +934,7 @@ impl ProgressiveSymbolCounter {
 
         // Main pass: count symbols (matching encode_ac_refine structure)
         let mut run = 0u32;
-        let mut br = 0usize;
+        let mut br_start = self.correction_bits_count; // Track where current block's bits start
 
         for k in ss..=se {
             let temp = absvalues[k as usize];
@@ -947,35 +948,54 @@ impl ProgressiveSymbolCounter {
             // This loop runs for BOTH temp > 1 and temp == 1, matching C mozjpeg
             while run >= 16 && k <= eob {
                 if self.eobrun > 0 {
+                    // Flush EOBRUN with BE bits only, keep BR bits
+                    // Note: flush_eobrun_count clears correction_bits_count
+                    let br_bits = self.correction_bits_count.saturating_sub(br_start);
                     self.flush_eobrun_count(ac_counter);
+                    // After flush, BR bits move to start
+                    self.correction_bits_count = br_bits;
+                    br_start = 0;
                 }
                 ac_counter.count(0xF0); // ZRL
                 run -= 16;
+                // BR bits are emitted with ZRL, so clear them
+                self.correction_bits_count = br_start;
             }
 
             if temp > 1 {
                 // Previously coded - just adds a correction bit (no Huffman symbol)
-                br += 1;
+                self.correction_bits_count += 1;
                 continue;
             }
 
             // temp == 1: Newly non-zero coefficient
             if self.eobrun > 0 {
+                // Flush EOBRUN with BE bits only
+                // Note: flush_eobrun_count clears correction_bits_count
+                let br_bits = self.correction_bits_count.saturating_sub(br_start);
                 self.flush_eobrun_count(ac_counter);
+                // After flush, BR bits move to start
+                self.correction_bits_count = br_bits;
+                br_start = 0;
             }
 
             // Symbol = (run << 4) | 1 (always category 1 for refinement)
             let symbol = ((run as u8) << 4) | 1;
             ac_counter.count(symbol);
 
+            // BR bits are emitted with the symbol
+            self.correction_bits_count = br_start;
             run = 0;
-            br = 0;
         }
 
         // Handle remaining run (EOB)
+        let br = self.correction_bits_count - br_start;
         if run > 0 || br > 0 {
             self.eobrun += 1;
-            if self.eobrun == 0x7FFF {
+            // Match encoder's flush conditions:
+            // - eobrun overflow
+            // - correction_bits overflow (1000 - DCTSIZE2 + 1 = 937)
+            if self.eobrun == 0x7FFF || self.correction_bits_count > (1000 - DCTSIZE2 + 1) {
                 self.flush_eobrun_count(ac_counter);
             }
         }
@@ -999,6 +1019,8 @@ impl ProgressiveSymbolCounter {
         ac_counter.count(symbol);
 
         self.eobrun = 0;
+        // All correction bits are emitted with the EOBRUN
+        self.correction_bits_count = 0;
     }
 
     /// Finish counting for a scan (flush any pending EOBRUN).

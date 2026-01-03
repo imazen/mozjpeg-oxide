@@ -1155,6 +1155,156 @@ impl Encoder {
         Ok(())
     }
 
+    /// Encode pre-converted planar YCbCr image data to JPEG.
+    ///
+    /// This method accepts YCbCr data that has already been:
+    /// 1. Converted from RGB to YCbCr color space
+    /// 2. Downsampled according to the encoder's subsampling mode
+    ///
+    /// Use this when you have YCbCr data from another source (e.g., video frames)
+    /// or want to avoid the overhead of RGB-to-YCbCr conversion.
+    ///
+    /// # Arguments
+    /// * `y` - Luma plane (width × height bytes)
+    /// * `cb` - Cb chroma plane (chroma_width × chroma_height bytes)
+    /// * `cr` - Cr chroma plane (chroma_width × chroma_height bytes)
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    ///
+    /// The chroma plane dimensions depend on the subsampling mode:
+    /// - 4:4:4: chroma_width = width, chroma_height = height
+    /// - 4:2:2: chroma_width = ceil(width/2), chroma_height = height
+    /// - 4:2:0: chroma_width = ceil(width/2), chroma_height = ceil(height/2)
+    ///
+    /// # Returns
+    /// JPEG-encoded data as a `Vec<u8>`.
+    ///
+    /// # Errors
+    /// Returns an error if plane sizes don't match expected dimensions.
+    pub fn encode_ycbcr_planar(
+        &self,
+        y: &[u8],
+        cb: &[u8],
+        cr: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<u8>> {
+        let mut output = Vec::new();
+        self.encode_ycbcr_planar_to_writer(y, cb, cr, width, height, &mut output)?;
+        Ok(output)
+    }
+
+    /// Encode pre-converted planar YCbCr image data to a writer.
+    ///
+    /// See [`encode_ycbcr_planar`](Self::encode_ycbcr_planar) for details.
+    pub fn encode_ycbcr_planar_to_writer<W: Write>(
+        &self,
+        y: &[u8],
+        cb: &[u8],
+        cr: &[u8],
+        width: u32,
+        height: u32,
+        output: W,
+    ) -> Result<()> {
+        let width = width as usize;
+        let height = height as usize;
+
+        // Validate dimensions
+        if width == 0 || height == 0 {
+            return Err(Error::InvalidDimensions {
+                width: width as u32,
+                height: height as u32,
+            });
+        }
+
+        // Calculate expected plane sizes
+        let y_size = width.checked_mul(height).ok_or(Error::InvalidDimensions {
+            width: width as u32,
+            height: height as u32,
+        })?;
+
+        let (luma_h, luma_v) = self.subsampling.luma_factors();
+        let (chroma_width, chroma_height) =
+            sample::subsampled_dimensions(width, height, luma_h as usize, luma_v as usize);
+        let chroma_size = chroma_width
+            .checked_mul(chroma_height)
+            .ok_or(Error::AllocationFailed)?;
+
+        // Validate Y plane size
+        if y.len() != y_size {
+            return Err(Error::BufferSizeMismatch {
+                expected: y_size,
+                actual: y.len(),
+            });
+        }
+
+        // Validate Cb plane size
+        if cb.len() != chroma_size {
+            return Err(Error::BufferSizeMismatch {
+                expected: chroma_size,
+                actual: cb.len(),
+            });
+        }
+
+        // Validate Cr plane size
+        if cr.len() != chroma_size {
+            return Err(Error::BufferSizeMismatch {
+                expected: chroma_size,
+                actual: cr.len(),
+            });
+        }
+
+        // Expand planes to MCU-aligned dimensions
+        let (mcu_width, mcu_height) =
+            sample::mcu_aligned_dimensions(width, height, luma_h as usize, luma_v as usize);
+        let (mcu_chroma_w, mcu_chroma_h) =
+            (mcu_width / luma_h as usize, mcu_height / luma_v as usize);
+
+        let mcu_y_size = mcu_width
+            .checked_mul(mcu_height)
+            .ok_or(Error::AllocationFailed)?;
+        let mcu_chroma_size = mcu_chroma_w
+            .checked_mul(mcu_chroma_h)
+            .ok_or(Error::AllocationFailed)?;
+        let mut y_mcu = try_alloc_vec(0u8, mcu_y_size)?;
+        let mut cb_mcu = try_alloc_vec(0u8, mcu_chroma_size)?;
+        let mut cr_mcu = try_alloc_vec(0u8, mcu_chroma_size)?;
+
+        sample::expand_to_mcu(y, width, height, &mut y_mcu, mcu_width, mcu_height);
+        sample::expand_to_mcu(
+            cb,
+            chroma_width,
+            chroma_height,
+            &mut cb_mcu,
+            mcu_chroma_w,
+            mcu_chroma_h,
+        );
+        sample::expand_to_mcu(
+            cr,
+            chroma_width,
+            chroma_height,
+            &mut cr_mcu,
+            mcu_chroma_w,
+            mcu_chroma_h,
+        );
+
+        // Encode using shared helper
+        self.encode_ycbcr_mcu_to_writer(
+            &y_mcu,
+            &cb_mcu,
+            &cr_mcu,
+            width,
+            height,
+            mcu_width,
+            mcu_height,
+            chroma_width,
+            chroma_height,
+            mcu_chroma_w,
+            mcu_chroma_h,
+            output,
+        )
+    }
+
     /// Encode RGB image data to a writer.
     pub fn encode_rgb_to_writer<W: Write>(
         &self,
@@ -1246,6 +1396,45 @@ impl Encoder {
             mcu_chroma_w,
             mcu_chroma_h,
         );
+
+        // Encode using shared helper
+        self.encode_ycbcr_mcu_to_writer(
+            &y_mcu,
+            &cb_mcu,
+            &cr_mcu,
+            width,
+            height,
+            mcu_width,
+            mcu_height,
+            chroma_width,
+            chroma_height,
+            mcu_chroma_w,
+            mcu_chroma_h,
+            output,
+        )
+    }
+
+    /// Internal helper: Encode MCU-aligned YCbCr planes to JPEG.
+    ///
+    /// This is the shared encoding logic used by both `encode_rgb_to_writer`
+    /// and `encode_ycbcr_planar_to_writer`.
+    #[allow(clippy::too_many_arguments)]
+    fn encode_ycbcr_mcu_to_writer<W: Write>(
+        &self,
+        y_mcu: &[u8],
+        cb_mcu: &[u8],
+        cr_mcu: &[u8],
+        width: usize,
+        height: usize,
+        mcu_width: usize,
+        mcu_height: usize,
+        chroma_width: usize,
+        chroma_height: usize,
+        mcu_chroma_w: usize,
+        mcu_chroma_h: usize,
+        output: W,
+    ) -> Result<()> {
+        let (luma_h, luma_v) = self.subsampling.luma_factors();
 
         // Step 4: Create quantization tables
         let (luma_qtable, chroma_qtable) = {
@@ -1375,11 +1564,11 @@ impl Encoder {
             };
 
             self.collect_blocks(
-                &y_mcu,
+                y_mcu,
                 mcu_width,
                 mcu_height,
-                &cb_mcu,
-                &cr_mcu,
+                cb_mcu,
+                cr_mcu,
                 mcu_chroma_w,
                 mcu_chroma_h,
                 &luma_qtable.values,
@@ -1758,11 +1947,11 @@ impl Encoder {
             };
 
             self.collect_blocks(
-                &y_mcu,
+                y_mcu,
                 mcu_width,
                 mcu_height,
-                &cb_mcu,
-                &cr_mcu,
+                cb_mcu,
+                cr_mcu,
                 mcu_chroma_w,
                 mcu_chroma_h,
                 &luma_qtable.values,
@@ -1951,11 +2140,11 @@ impl Encoder {
             let mut entropy = EntropyEncoder::new(&mut bit_writer);
 
             self.encode_mcus(
-                &y_mcu,
+                y_mcu,
                 mcu_width,
                 mcu_height,
-                &cb_mcu,
-                &cr_mcu,
+                cb_mcu,
+                cr_mcu,
                 mcu_chroma_w,
                 mcu_chroma_h,
                 &luma_qtable.values,
@@ -2907,5 +3096,102 @@ mod tests {
         assert!(encoder.progressive);
         assert!(encoder.optimize_huffman);
         assert!(encoder.optimize_scans);
+    }
+
+    #[test]
+    fn test_encode_ycbcr_planar_444() {
+        let width = 32u32;
+        let height = 32u32;
+
+        // Create test image with gradient pattern
+        let y_plane: Vec<u8> = (0..width * height)
+            .map(|i| ((i % width) * 255 / width) as u8)
+            .collect();
+        let cb_plane: Vec<u8> = (0..width * height)
+            .map(|i| ((i / width) * 255 / height) as u8)
+            .collect();
+        let cr_plane: Vec<u8> = vec![128u8; (width * height) as usize];
+
+        let encoder = Encoder::new(Preset::BaselineBalanced)
+            .quality(85)
+            .subsampling(Subsampling::S444);
+
+        let jpeg_data = encoder
+            .encode_ycbcr_planar(&y_plane, &cb_plane, &cr_plane, width, height)
+            .expect("encode_ycbcr_planar should succeed");
+
+        // Verify it's a valid JPEG
+        assert!(jpeg_data.starts_with(&[0xFF, 0xD8, 0xFF])); // SOI + marker
+        assert!(jpeg_data.ends_with(&[0xFF, 0xD9])); // EOI
+        assert!(jpeg_data.len() > 200); // Reasonable size for 32x32
+    }
+
+    #[test]
+    fn test_encode_ycbcr_planar_420() {
+        let width = 32u32;
+        let height = 32u32;
+
+        // For 4:2:0, chroma planes are half resolution in each dimension
+        let chroma_w = (width + 1) / 2;
+        let chroma_h = (height + 1) / 2;
+
+        let y_plane: Vec<u8> = vec![128u8; (width * height) as usize];
+        let cb_plane: Vec<u8> = vec![100u8; (chroma_w * chroma_h) as usize];
+        let cr_plane: Vec<u8> = vec![150u8; (chroma_w * chroma_h) as usize];
+
+        let encoder = Encoder::new(Preset::BaselineBalanced)
+            .quality(85)
+            .subsampling(Subsampling::S420);
+
+        let jpeg_data = encoder
+            .encode_ycbcr_planar(&y_plane, &cb_plane, &cr_plane, width, height)
+            .expect("encode_ycbcr_planar with 4:2:0 should succeed");
+
+        // Verify it's a valid JPEG
+        assert!(jpeg_data.starts_with(&[0xFF, 0xD8, 0xFF]));
+        assert!(jpeg_data.ends_with(&[0xFF, 0xD9]));
+    }
+
+    #[test]
+    fn test_encode_ycbcr_planar_422() {
+        let width = 32u32;
+        let height = 32u32;
+
+        // For 4:2:2, chroma is half width, full height
+        let chroma_w = (width + 1) / 2;
+
+        let y_plane: Vec<u8> = vec![128u8; (width * height) as usize];
+        let cb_plane: Vec<u8> = vec![100u8; (chroma_w * height) as usize];
+        let cr_plane: Vec<u8> = vec![150u8; (chroma_w * height) as usize];
+
+        let encoder = Encoder::new(Preset::BaselineBalanced)
+            .quality(85)
+            .subsampling(Subsampling::S422);
+
+        let jpeg_data = encoder
+            .encode_ycbcr_planar(&y_plane, &cb_plane, &cr_plane, width, height)
+            .expect("encode_ycbcr_planar with 4:2:2 should succeed");
+
+        assert!(jpeg_data.starts_with(&[0xFF, 0xD8, 0xFF]));
+        assert!(jpeg_data.ends_with(&[0xFF, 0xD9]));
+    }
+
+    #[test]
+    fn test_encode_ycbcr_planar_wrong_size() {
+        let width = 32u32;
+        let height = 32u32;
+
+        // Correct Y plane but wrong chroma plane sizes for 4:2:0
+        let y_plane: Vec<u8> = vec![128u8; (width * height) as usize];
+        let cb_plane: Vec<u8> = vec![100u8; 10]; // Too small!
+        let cr_plane: Vec<u8> = vec![150u8; 10]; // Too small!
+
+        let encoder = Encoder::new(Preset::BaselineBalanced)
+            .quality(85)
+            .subsampling(Subsampling::S420);
+
+        let result = encoder.encode_ycbcr_planar(&y_plane, &cb_plane, &cr_plane, width, height);
+
+        assert!(result.is_err());
     }
 }

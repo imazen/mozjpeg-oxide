@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-01-03
+
+### Added
+- **`encode_ycbcr_planar()`** - Encode pre-converted planar YCbCr data directly, bypassing RGB-to-YCbCr conversion. Supports all subsampling modes (4:4:4, 4:2:2, 4:2:0).
+- **`CMozjpeg::encode_ycbcr_planar()`** - Same capability for C mozjpeg wrapper
+- **Decoder round-trip validation** - CI now validates encoded JPEGs against multiple decoders
+
+### Changed
+- **`configure_sys()` renamed to `to_c_mozjpeg()`** - Clearer naming for C mozjpeg interop
+- `sys-local` is now an optional dev dependency gated by feature flag
+
 ## [0.3.0] - 2025-01-02
 
 ### Breaking Changes
@@ -86,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Platforms: Linux, macOS, Windows (x64 and ARM64)
 - Output compatible with all standard JPEG decoders
 
+[0.4.0]: https://github.com/imazen/mozjpeg-rs/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/imazen/mozjpeg-rs/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/imazen/mozjpeg-rs/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/imazen/mozjpeg-rs/compare/v0.2.3...v0.2.4

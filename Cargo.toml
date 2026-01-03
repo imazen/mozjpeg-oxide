@@ -1,6 +1,6 @@
 [package]
 name = "mozjpeg-rs"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.89.0"
 license = "BSD-3-Clause"
@@ -35,7 +35,8 @@ simd = ["simd-intrinsics"]
 png = ["dep:png"]
 # Enables granular FFI tests against instrumented C mozjpeg internals (DCT, quant, etc.)
 # Requires imazen/mozjpeg fork with test exports at ../mozjpeg - use scripts/setup-instrumented-mozjpeg.sh
-_instrument-c-mozjpeg-internals = ["dep:sys-local"]
+# NOTE: This feature only works with local development (sys-local not on crates.io)
+_instrument-c-mozjpeg-internals = []
 # Enables mozjpeg-sys configuration: configure a C mozjpeg encoder from our Encoder
 mozjpeg-sys-config = ["dep:mozjpeg-sys", "dep:libc"]
 
@@ -49,8 +50,6 @@ wide = "1.1.1"
 # Optional: mozjpeg-sys configuration (configure C encoder from our settings)
 mozjpeg-sys = { version = "2.2", optional = true }
 libc = { version = "0.2", optional = true }
-# Optional: FFI comparison against local mozjpeg C source (requires ../mozjpeg)
-sys-local = { path = "crates/sys-local", optional = true }
 
 [dev-dependencies]
 dssim = "3.2"

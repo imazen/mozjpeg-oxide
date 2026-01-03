@@ -384,18 +384,32 @@ enum TestResult {
 /// For very small images with chroma subsampling, decoders use different
 /// upsampling algorithms which causes larger pixel differences. This is
 /// expected behavior, not an encoder bug.
-fn max_allowed_diff(width: u32, height: u32, subsampling: Subsampling) -> u8 {
-    // Check if chroma plane is pathologically small
-    let chroma_small = match subsampling {
-        Subsampling::S444 | Subsampling::Gray => false,
-        Subsampling::S422 => width < 8, // chroma width is half
-        Subsampling::S420 => width < 8 || height < 8, // chroma is half in both
-        Subsampling::S440 => height < 8, // chroma height is half
+///
+/// Investigation (see decoder_boundary_test.rs) found the exact threshold:
+///
+/// **The issue occurs when chroma_width == 2 (luma width 3 or 4)**
+///
+/// | Width | Chroma Width | 4:2:2 diff | 4:2:0 diff |
+/// |-------|--------------|------------|------------|
+/// | 1-2   | 1            | ≤2         | ≤4         |
+/// | 3-4   | 2            | **24-28**  | **27-28**  |
+/// | 5+    | 3+           | ≤3         | ≤5         |
+///
+/// Height subsampling (4:4:0) does NOT show this issue.
+///
+/// Root cause: mozjpeg uses "fancy" chroma upsampling (triangle filter)
+/// while jpeg-decoder and zune-jpeg use simpler replication. When
+/// chroma_width == 2, the two algorithms produce visibly different results.
+fn max_allowed_diff(width: u32, _height: u32, subsampling: Subsampling) -> u8 {
+    // Calculate chroma width for horizontal subsampling modes
+    let chroma_width = match subsampling {
+        Subsampling::S422 | Subsampling::S420 => (width + 1) / 2,
+        _ => width, // No horizontal subsampling
     };
 
-    if chroma_small {
-        // Different chroma upsampling algorithms (bilinear vs simple replication)
-        // can differ by up to ~40 at very small sizes
+    if chroma_width == 2 {
+        // Exact boundary: chroma_width == 2 causes large decoder differences
+        // due to different upsampling algorithms (fancy vs simple)
         50
     } else {
         // Normal case: IDCT differences are typically ≤4, but progressive

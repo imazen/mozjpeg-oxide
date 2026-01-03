@@ -1157,15 +1157,11 @@ impl Encoder {
 
     /// Encode pre-converted planar YCbCr image data to JPEG.
     ///
-    /// This method accepts YCbCr data that has already been:
-    /// 1. Converted from RGB to YCbCr color space
-    /// 2. Downsampled according to the encoder's subsampling mode
-    ///
-    /// Use this when you have YCbCr data from another source (e.g., video frames)
-    /// or want to avoid the overhead of RGB-to-YCbCr conversion.
+    /// This method accepts tightly packed YCbCr data (no row padding).
+    /// For strided data, use [`encode_ycbcr_planar_strided`](Self::encode_ycbcr_planar_strided).
     ///
     /// # Arguments
-    /// * `y` - Luma plane (width × height bytes)
+    /// * `y` - Luma plane (width × height bytes, tightly packed)
     /// * `cb` - Cb chroma plane (chroma_width × chroma_height bytes)
     /// * `cr` - Cr chroma plane (chroma_width × chroma_height bytes)
     /// * `width` - Image width in pixels
@@ -1189,9 +1185,24 @@ impl Encoder {
         width: u32,
         height: u32,
     ) -> Result<Vec<u8>> {
-        let mut output = Vec::new();
-        self.encode_ycbcr_planar_to_writer(y, cb, cr, width, height, &mut output)?;
-        Ok(output)
+        // For packed data, stride equals width
+        let (luma_h, luma_v) = self.subsampling.luma_factors();
+        let (chroma_width, _) = sample::subsampled_dimensions(
+            width as usize,
+            height as usize,
+            luma_h as usize,
+            luma_v as usize,
+        );
+        self.encode_ycbcr_planar_strided(
+            y,
+            width as usize,
+            cb,
+            chroma_width,
+            cr,
+            chroma_width,
+            width,
+            height,
+        )
     }
 
     /// Encode pre-converted planar YCbCr image data to a writer.
@@ -1202,6 +1213,101 @@ impl Encoder {
         y: &[u8],
         cb: &[u8],
         cr: &[u8],
+        width: u32,
+        height: u32,
+        output: W,
+    ) -> Result<()> {
+        // For packed data, stride equals width
+        let (luma_h, luma_v) = self.subsampling.luma_factors();
+        let (chroma_width, _) = sample::subsampled_dimensions(
+            width as usize,
+            height as usize,
+            luma_h as usize,
+            luma_v as usize,
+        );
+        self.encode_ycbcr_planar_strided_to_writer(
+            y,
+            width as usize,
+            cb,
+            chroma_width,
+            cr,
+            chroma_width,
+            width,
+            height,
+            output,
+        )
+    }
+
+    /// Encode pre-converted planar YCbCr image data with arbitrary strides.
+    ///
+    /// This method accepts YCbCr data that has already been:
+    /// 1. Converted from RGB to YCbCr color space
+    /// 2. Downsampled according to the encoder's subsampling mode
+    ///
+    /// Use this when you have YCbCr data from video decoders or other sources
+    /// that may have row padding (stride > width).
+    ///
+    /// # Arguments
+    /// * `y` - Luma plane data
+    /// * `y_stride` - Bytes per row in luma plane (must be >= width)
+    /// * `cb` - Cb chroma plane data
+    /// * `cb_stride` - Bytes per row in Cb plane (must be >= chroma_width)
+    /// * `cr` - Cr chroma plane data
+    /// * `cr_stride` - Bytes per row in Cr plane (must be >= chroma_width)
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    ///
+    /// The chroma plane dimensions depend on the subsampling mode:
+    /// - 4:4:4: chroma_width = width, chroma_height = height
+    /// - 4:2:2: chroma_width = ceil(width/2), chroma_height = height
+    /// - 4:2:0: chroma_width = ceil(width/2), chroma_height = ceil(height/2)
+    ///
+    /// # Returns
+    /// JPEG-encoded data as a `Vec<u8>`.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - Strides are less than the required width
+    /// - Plane sizes don't match stride × height
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_ycbcr_planar_strided(
+        &self,
+        y: &[u8],
+        y_stride: usize,
+        cb: &[u8],
+        cb_stride: usize,
+        cr: &[u8],
+        cr_stride: usize,
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<u8>> {
+        let mut output = Vec::new();
+        self.encode_ycbcr_planar_strided_to_writer(
+            y,
+            y_stride,
+            cb,
+            cb_stride,
+            cr,
+            cr_stride,
+            width,
+            height,
+            &mut output,
+        )?;
+        Ok(output)
+    }
+
+    /// Encode pre-converted planar YCbCr image data with arbitrary strides to a writer.
+    ///
+    /// See [`encode_ycbcr_planar_strided`](Self::encode_ycbcr_planar_strided) for details.
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_ycbcr_planar_strided_to_writer<W: Write>(
+        &self,
+        y: &[u8],
+        y_stride: usize,
+        cb: &[u8],
+        cb_stride: usize,
+        cr: &[u8],
+        cr_stride: usize,
         width: u32,
         height: u32,
         output: W,
@@ -1217,21 +1323,48 @@ impl Encoder {
             });
         }
 
-        // Calculate expected plane sizes
-        let y_size = width.checked_mul(height).ok_or(Error::InvalidDimensions {
-            width: width as u32,
-            height: height as u32,
-        })?;
+        // Validate Y stride
+        if y_stride < width {
+            return Err(Error::InvalidSamplingFactor {
+                h: y_stride as u8,
+                v: width as u8,
+            });
+        }
 
         let (luma_h, luma_v) = self.subsampling.luma_factors();
         let (chroma_width, chroma_height) =
             sample::subsampled_dimensions(width, height, luma_h as usize, luma_v as usize);
-        let chroma_size = chroma_width
+
+        // Validate chroma strides
+        if cb_stride < chroma_width {
+            return Err(Error::InvalidSamplingFactor {
+                h: cb_stride as u8,
+                v: chroma_width as u8,
+            });
+        }
+        if cr_stride < chroma_width {
+            return Err(Error::InvalidSamplingFactor {
+                h: cr_stride as u8,
+                v: chroma_width as u8,
+            });
+        }
+
+        // Calculate expected plane sizes (stride × height)
+        let y_size = y_stride
+            .checked_mul(height)
+            .ok_or(Error::InvalidDimensions {
+                width: width as u32,
+                height: height as u32,
+            })?;
+        let cb_size = cb_stride
+            .checked_mul(chroma_height)
+            .ok_or(Error::AllocationFailed)?;
+        let cr_size = cr_stride
             .checked_mul(chroma_height)
             .ok_or(Error::AllocationFailed)?;
 
         // Validate Y plane size
-        if y.len() != y_size {
+        if y.len() < y_size {
             return Err(Error::BufferSizeMismatch {
                 expected: y_size,
                 actual: y.len(),
@@ -1239,17 +1372,17 @@ impl Encoder {
         }
 
         // Validate Cb plane size
-        if cb.len() != chroma_size {
+        if cb.len() < cb_size {
             return Err(Error::BufferSizeMismatch {
-                expected: chroma_size,
+                expected: cb_size,
                 actual: cb.len(),
             });
         }
 
         // Validate Cr plane size
-        if cr.len() != chroma_size {
+        if cr.len() < cr_size {
             return Err(Error::BufferSizeMismatch {
-                expected: chroma_size,
+                expected: cr_size,
                 actual: cr.len(),
             });
         }
@@ -1270,18 +1403,22 @@ impl Encoder {
         let mut cb_mcu = try_alloc_vec(0u8, mcu_chroma_size)?;
         let mut cr_mcu = try_alloc_vec(0u8, mcu_chroma_size)?;
 
-        sample::expand_to_mcu(y, width, height, &mut y_mcu, mcu_width, mcu_height);
-        sample::expand_to_mcu(
+        sample::expand_to_mcu_strided(
+            y, width, y_stride, height, &mut y_mcu, mcu_width, mcu_height,
+        );
+        sample::expand_to_mcu_strided(
             cb,
             chroma_width,
+            cb_stride,
             chroma_height,
             &mut cb_mcu,
             mcu_chroma_w,
             mcu_chroma_h,
         );
-        sample::expand_to_mcu(
+        sample::expand_to_mcu_strided(
             cr,
             chroma_width,
+            cr_stride,
             chroma_height,
             &mut cr_mcu,
             mcu_chroma_w,
@@ -3193,5 +3330,88 @@ mod tests {
         let result = encoder.encode_ycbcr_planar(&y_plane, &cb_plane, &cr_plane, width, height);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encode_ycbcr_planar_strided() {
+        let width = 30u32; // Not a multiple of stride
+        let height = 20u32;
+        let y_stride = 32usize; // Stride with 2 bytes padding per row
+
+        // For 4:2:0, chroma is half resolution
+        let chroma_width = 15usize;
+        let chroma_height = 10usize;
+        let cb_stride = 16usize; // Stride with 1 byte padding per row
+
+        // Create Y plane with stride (fill with gradient, padding with zeros)
+        let mut y_plane = vec![0u8; y_stride * height as usize];
+        for row in 0..height as usize {
+            for col in 0..width as usize {
+                y_plane[row * y_stride + col] = ((col * 255) / width as usize) as u8;
+            }
+        }
+
+        // Create chroma planes with stride
+        let mut cb_plane = vec![0u8; cb_stride * chroma_height];
+        let mut cr_plane = vec![0u8; cb_stride * chroma_height];
+        for row in 0..chroma_height {
+            for col in 0..chroma_width {
+                cb_plane[row * cb_stride + col] = 100;
+                cr_plane[row * cb_stride + col] = 150;
+            }
+        }
+
+        let encoder = Encoder::new(Preset::BaselineBalanced)
+            .quality(85)
+            .subsampling(Subsampling::S420);
+
+        let jpeg_data = encoder
+            .encode_ycbcr_planar_strided(
+                &y_plane, y_stride, &cb_plane, cb_stride, &cr_plane, cb_stride, width, height,
+            )
+            .expect("strided encoding should succeed");
+
+        // Verify it's a valid JPEG
+        assert!(jpeg_data.starts_with(&[0xFF, 0xD8, 0xFF]));
+        assert!(jpeg_data.ends_with(&[0xFF, 0xD9]));
+    }
+
+    #[test]
+    fn test_encode_ycbcr_planar_strided_matches_packed() {
+        let width = 32u32;
+        let height = 32u32;
+
+        // Create packed plane data
+        let y_packed: Vec<u8> = (0..width * height).map(|i| (i % 256) as u8).collect();
+        let chroma_w = (width + 1) / 2;
+        let chroma_h = (height + 1) / 2;
+        let cb_packed: Vec<u8> = vec![100u8; (chroma_w * chroma_h) as usize];
+        let cr_packed: Vec<u8> = vec![150u8; (chroma_w * chroma_h) as usize];
+
+        let encoder = Encoder::new(Preset::BaselineBalanced)
+            .quality(85)
+            .subsampling(Subsampling::S420);
+
+        // Encode with packed API
+        let jpeg_packed = encoder
+            .encode_ycbcr_planar(&y_packed, &cb_packed, &cr_packed, width, height)
+            .expect("packed encoding should succeed");
+
+        // Encode with strided API (stride == width means packed)
+        let jpeg_strided = encoder
+            .encode_ycbcr_planar_strided(
+                &y_packed,
+                width as usize,
+                &cb_packed,
+                chroma_w as usize,
+                &cr_packed,
+                chroma_w as usize,
+                width,
+                height,
+            )
+            .expect("strided encoding should succeed");
+
+        // Both should produce identical output
+        assert_eq!(jpeg_packed, jpeg_strided);
     }
 }

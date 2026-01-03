@@ -207,13 +207,39 @@ pub fn expand_to_mcu(
     output_width: usize,
     output_height: usize,
 ) {
+    // Delegate to strided version with stride = width (packed data)
+    expand_to_mcu_strided(
+        input,
+        input_width,
+        input_width,
+        input_height,
+        output,
+        output_width,
+        output_height,
+    );
+}
+
+/// Expand an image with arbitrary stride to MCU-aligned dimensions.
+///
+/// Like `expand_to_mcu` but supports strided input where `input_stride >= input_width`.
+/// Replicates edge pixels to fill the MCU boundary.
+pub fn expand_to_mcu_strided(
+    input: &[u8],
+    input_width: usize,
+    input_stride: usize,
+    input_height: usize,
+    output: &mut [u8],
+    output_width: usize,
+    output_height: usize,
+) {
+    assert!(input_stride >= input_width);
     assert!(output_width >= input_width);
     assert!(output_height >= input_height);
     assert!(output.len() >= output_width * output_height);
 
     for y in 0..output_height {
         let src_y = y.min(input_height - 1);
-        let src_start = src_y * input_width;
+        let src_start = src_y * input_stride;
         let dst_start = y * output_width;
 
         // Copy existing pixels

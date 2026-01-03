@@ -299,6 +299,41 @@ Previously reported "max diff ~11" was due to comparing different encoding modes
 - DC clamping to 1023 now matches C behavior
 - File size gap at high quality due to progressive scan structure (see above)
 
+#### Decoder Chroma Upsampling Variance - DOCUMENTED ✅
+
+When testing decoder round-trips with very small images using chroma subsampling,
+we observed large pixel differences (up to 41) between decoders. Investigation
+revealed this is expected decoder behavior, not an encoder bug.
+
+**The exact boundary: `chroma_width == 2` (luma width 3-4 with horizontal subsampling)**
+
+| Luma Width | Chroma Width | Rust Decoders vs mozjpeg | Notes |
+|------------|--------------|--------------------------|-------|
+| 1-2 | 1 | ≤4 diff | Single sample, all agree |
+| **3-4** | **2** | **24-41 diff** | Triangle vs simple upsampling |
+| 5+ | 3+ | 0 diff | Enough samples, all agree |
+
+**Root cause:** Different chroma upsampling algorithms:
+- **jpeg-decoder & zune-jpeg**: Simple replication/linear interpolation
+- **mozjpeg**: "Fancy" triangle filter (optimized for perceptual quality)
+
+**Surprisingly, Rust decoders are closer to the original image** at the boundary:
+
+| Case | Rust mean error | mozjpeg mean error | Winner |
+|------|-----------------|--------------------| -------|
+| 3×4 4:2:2 (chroma 2×4) | 11.6 | 12.1 | Rust by 0.4 |
+| 4×4 4:2:0 (chroma 2×2) | 12.3 | 18.0 | Rust by 5.7 |
+| 5×4 4:2:2 (chroma 3×4) | 4.7 | 4.7 | Tie (identical) |
+
+The mozjpeg triangle filter is designed for normal images where smooth interpolation
+improves perceptual quality. But with only 2 chroma samples, the filter introduces
+more deviation from the original than simple replication.
+
+**Test coverage:** `decoder_roundtrip.rs` tests 2496 combinations (26 dimensions ×
+4 presets × 3 subsamplings × 8 qualities) with appropriate tolerance for this boundary.
+
+**Analysis tool:** `examples/decoder_chroma_analysis.rs` shows pixel-by-pixel comparison.
+
 ## Workflow Rules
 
 ### Commit Strategy

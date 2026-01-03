@@ -34,7 +34,8 @@ simd = ["simd-intrinsics"]
 # Enable PNG loading in corpus module (enabled by default in dev)
 png = ["dep:png"]
 # Enables FFI comparison tests against local mozjpeg C source
-__sys_local_available = []
+# Requires local mozjpeg build at ../mozjpeg
+__sys_local_available = ["dep:sys-local"]
 # Enables mozjpeg-sys configuration: configure a C mozjpeg encoder from our Encoder
 mozjpeg-sys-config = ["dep:mozjpeg-sys", "dep:libc"]
 
@@ -48,6 +49,8 @@ wide = "1.1.1"
 # Optional: mozjpeg-sys configuration (configure C encoder from our settings)
 mozjpeg-sys = { version = "2.2", optional = true }
 libc = { version = "0.2", optional = true }
+# Optional: FFI comparison against local mozjpeg C source (requires ../mozjpeg)
+sys-local = { path = "crates/sys-local", optional = true }
 
 [dev-dependencies]
 dssim = "3.2"
@@ -64,9 +67,6 @@ mozjpeg-sys = "2.2"
 mozjpeg = "0.10"
 # Codec testing infrastructure (provides DSSIM, SSIMULACRA2, Butteraugli metrics, ICC support)
 codec-eval = { git = "https://github.com/imazen/codec-eval", rev = "0ee46bc" }
-# Note: sys-local is NOT included because it requires local mozjpeg C source.
-# To run ffi_comparison tests locally, uncomment below:
-sys-local = { path = "crates/sys-local" }
 # Butteraugli perceptual image quality metric
 butteraugli = "0.3"
 chrono = { version = "0.4.42", features = ["serde"] }

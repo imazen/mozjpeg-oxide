@@ -3,14 +3,12 @@
 //! These tests compare our Rust implementations against the C mozjpeg library
 //! at a granular level to ensure correctness.
 //!
-//! Uses sys-local which builds from local C source at ~/work/mozjpeg.
-//! To run these tests, uncomment sys-local in Cargo.toml dev-dependencies.
+//! Uses sys-local which builds from instrumented imazen/mozjpeg fork at ../mozjpeg.
+//! To set up: run `scripts/setup-instrumented-mozjpeg.sh`
+//! To run: `cargo test --test ffi_comparison --features _instrument-c-mozjpeg-internals`
 //!
-//! This entire file is disabled in CI (sys-local is not included in dev-deps).
-
-// This file will fail to compile if sys-local is not in dev-dependencies.
-// That's intentional - these tests only run locally with the C source available.
-#![cfg(feature = "__sys_local_available")]
+//! This file is only compiled when the `_instrument-c-mozjpeg-internals` feature is enabled.
+#![cfg(feature = "_instrument-c-mozjpeg-internals")]
 
 use mozjpeg_rs::{color, dct, quant, sample};
 use sys_local as ffi;

@@ -471,3 +471,23 @@ pub use compat::ConfigWarnings;
 /// Error configuring a C mozjpeg encoder.
 #[cfg(feature = "mozjpeg-sys-config")]
 pub use compat::ConfigError;
+
+/// C mozjpeg encoder with settings from a Rust [`Encoder`].
+///
+/// Created via [`Encoder::to_c_mozjpeg()`]. Provides methods for encoding
+/// images using the C mozjpeg library.
+///
+/// # Example
+///
+/// ```no_run
+/// use mozjpeg_rs::{Encoder, Preset};
+///
+/// let pixels: Vec<u8> = vec![128; 64 * 64 * 3];
+/// let jpeg = Encoder::new(Preset::ProgressiveBalanced)
+///     .quality(85)
+///     .to_c_mozjpeg()
+///     .encode_rgb(&pixels, 64, 64)?;
+/// # Ok::<(), mozjpeg_rs::Error>(())
+/// ```
+#[cfg(feature = "mozjpeg-sys-config")]
+pub use compat::CMozjpeg;

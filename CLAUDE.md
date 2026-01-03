@@ -514,3 +514,83 @@ GitHub Actions workflow runs on push/PR:
 - `bytemuck = "1.14"` - Safe transmutes (for future SIMD)
 - `dssim`, `ssimulacra2` (dev) - Perceptual quality metrics
 - `codec-eval` (dev) - From https://github.com/imazen/codec-comparison
+
+## Feature Flags
+
+### Published Features (safe to use)
+
+- **`mozjpeg-sys-config`** - Encode using C mozjpeg with Rust `Encoder` settings.
+  Adds `Encoder::to_c_mozjpeg()` which returns a `CMozjpeg` encoder.
+  Uses `mozjpeg-sys` from crates.io.
+
+  ```rust
+  let jpeg = encoder.to_c_mozjpeg().encode_rgb(&pixels, w, h)?;
+  ```
+
+- **`simd-intrinsics`** - Hand-written AVX2/NEON intrinsics for ~15% better DCT performance.
+  Without this, uses `multiversion` autovectorization (safe, ~87% of intrinsics perf).
+
+- **`png`** - Enable PNG loading in corpus module.
+
+### Development-Only Features (not published)
+
+- **`_instrument-c-mozjpeg-internals`** - Enables granular FFI tests against internal C mozjpeg
+  functions (DCT, quantization, color conversion, etc.). Requires imazen/mozjpeg fork with
+  test exports built locally. Use `scripts/setup-instrumented-mozjpeg.sh` to set up.
+
+## Decoder Alternatives
+
+**mozjpeg-rs is an ENCODER ONLY.** For decoding JPEG files, use one of:
+
+- **[jpeg-decoder](https://crates.io/crates/jpeg-decoder)** - Pure Rust, widely used
+- **[zune-jpeg](https://crates.io/crates/zune-jpeg)** - Pure Rust, fast, SIMD-optimized
+- **[mozjpeg-sys](https://crates.io/crates/mozjpeg-sys)** - C mozjpeg bindings (encode + decode)
+- **[jpegli-rs](https://github.com/psy-repos-rust/jpegli-rs)** - Rust port of Google's jpegli (WIP)
+
+## Round-Trip Decoder Validation
+
+The `decoder_roundtrip` test validates that all major JPEG decoders can decode mozjpeg-rs output
+and produce consistent results within expected quality bounds.
+
+**Test matrix:**
+- Decoders: jpeg-decoder, zune-jpeg, mozjpeg-sys (C decoder)
+- Encoder configs: all 4 Presets × subsampling modes
+- Quality levels: Q50, Q60, Q70, Q75, Q80, Q85, Q90, Q95
+- Images: 20 test images from corpus
+
+**Validation criteria:**
+- All decoders must successfully decode the JPEG
+- Decoded pixels must match between decoders (allowing ±1 for rounding)
+- Butteraugli distance must be within expected bounds for each Q level
+
+**Expected Butteraugli bounds by quality:**
+| Quality | Max Butteraugli |
+|---------|-----------------|
+| Q50 | 3.0 |
+| Q60 | 2.5 |
+| Q70 | 2.0 |
+| Q75 | 1.5 |
+| Q80 | 1.2 |
+| Q85 | 1.0 |
+| Q90 | 0.7 |
+| Q95 | 0.4 |
+
+## CI Test Organization
+
+Tests are organized to handle symbol conflicts between different mozjpeg bindings:
+
+```bash
+# Core tests (no FFI)
+cargo test -p mozjpeg-rs --lib
+
+# Integration tests using mozjpeg-sys from crates.io
+cargo test --test ffi_validation
+cargo test --test preset_parity
+cargo test --features mozjpeg-sys-config c_mozjpeg
+
+# Decoder round-trip tests
+cargo test --test decoder_roundtrip
+
+# Instrumented C mozjpeg tests (local development only)
+cargo test --test ffi_comparison --features _instrument-c-mozjpeg-internals
+```

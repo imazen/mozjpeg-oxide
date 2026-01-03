@@ -8,6 +8,18 @@ Pure Rust JPEG encoder based on Mozilla's [mozjpeg](https://github.com/mozilla/m
 [![codecov](https://codecov.io/gh/imazen/mozjpeg-rs/graph/badge.svg)](https://codecov.io/gh/imazen/mozjpeg-rs)
 [![License](https://img.shields.io/crates/l/mozjpeg-rs.svg)](LICENSE)
 
+## Encoder Only
+
+**mozjpeg-rs is a JPEG encoder only.** It does not decode JPEG files.
+
+For decoding, use one of these excellent crates:
+
+| Crate | Type | Notes |
+|-------|------|-------|
+| **[jpeg-decoder](https://crates.io/crates/jpeg-decoder)** | Pure Rust | Widely used, reliable |
+| **[zune-jpeg](https://crates.io/crates/zune-jpeg)** | Pure Rust | Fast, SIMD-optimized |
+| **[mozjpeg-sys](https://crates.io/crates/mozjpeg-sys)** | C bindings | Full mozjpeg (encode + decode) |
+
 ## Why mozjpeg-rs?
 
 | | mozjpeg-rs | C mozjpeg | libjpeg-turbo |

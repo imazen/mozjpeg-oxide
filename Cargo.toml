@@ -33,9 +33,9 @@ simd-intrinsics = []
 simd = ["simd-intrinsics"]
 # Enable PNG loading in corpus module (enabled by default in dev)
 png = ["dep:png"]
-# Enables FFI comparison tests against local mozjpeg C source
-# Requires local mozjpeg build at ../mozjpeg
-__sys_local_available = ["dep:sys-local"]
+# Enables granular FFI tests against instrumented C mozjpeg internals (DCT, quant, etc.)
+# Requires imazen/mozjpeg fork with test exports at ../mozjpeg - use scripts/setup-instrumented-mozjpeg.sh
+_instrument-c-mozjpeg-internals = ["dep:sys-local"]
 # Enables mozjpeg-sys configuration: configure a C mozjpeg encoder from our Encoder
 mozjpeg-sys-config = ["dep:mozjpeg-sys", "dep:libc"]
 
@@ -77,17 +77,17 @@ serde_json = "1.0.148"
 name = "encode"
 harness = false
 
-# Examples that require local mozjpeg C source (sys-local crate)
+# Examples that require instrumented C mozjpeg (sys-local crate)
 [[example]]
 name = "trace_pipeline"
-required-features = ["__sys_local_available"]
+required-features = ["_instrument-c-mozjpeg-internals"]
 
 [[example]]
 name = "quant_ffi_compare"
-required-features = ["__sys_local_available"]
+required-features = ["_instrument-c-mozjpeg-internals"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"__sys_local_available\", \"ffi-test\"))"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"_instrument-c-mozjpeg-internals\", \"ffi-test\"))"] }
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

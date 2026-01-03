@@ -2780,357 +2780,50 @@ impl Encoder {
 }
 
 // ============================================================================
-// mozjpeg-sys Configuration (optional feature)
+// C mozjpeg encoding (optional feature)
 // ============================================================================
 
 #[cfg(feature = "mozjpeg-sys-config")]
 impl Encoder {
-    /// Configure a C mozjpeg `jpeg_compress_struct` with settings matching this encoder.
+    /// Convert this encoder to a C mozjpeg encoder.
     ///
-    /// This applies all encoder settings to the C struct, allowing you to use
-    /// the C mozjpeg API with identical configuration to our Rust encoder.
-    ///
-    /// # Safety
-    ///
-    /// - `cinfo` must be a valid, initialized `jpeg_compress_struct`
-    /// - `jpeg_CreateCompress` must have been called on `cinfo`
-    /// - `jpeg_set_defaults` will be called by this method
-    ///
-    /// # Arguments
-    ///
-    /// - `cinfo`: Mutable reference to an initialized `jpeg_compress_struct`
-    /// - `width`: Image width in pixels
-    /// - `height`: Image height in pixels
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(ConfigWarnings)`: Configuration succeeded, warnings indicate settings
-    ///   that must be applied after `jpeg_start_compress`
-    /// - `Err(ConfigError)`: Configuration failed due to unsupported settings
+    /// Returns a [`CMozjpeg`](crate::CMozjpeg) that can encode images using
+    /// the C mozjpeg library with settings matching this Rust encoder.
     ///
     /// # Example
     ///
     /// ```no_run
     /// use mozjpeg_rs::{Encoder, Preset};
-    /// use mozjpeg_sys::*;
     ///
-    /// unsafe {
-    ///     let mut cinfo: jpeg_compress_struct = std::mem::zeroed();
-    ///     let mut jerr: jpeg_error_mgr = std::mem::zeroed();
-    ///     cinfo.common.err = jpeg_std_error(&mut jerr);
-    ///     jpeg_CreateCompress(&mut cinfo, JPEG_LIB_VERSION as i32,
-    ///         std::mem::size_of::<jpeg_compress_struct>());
+    /// let pixels: Vec<u8> = vec![128; 64 * 64 * 3];
+    /// let encoder = Encoder::new(Preset::ProgressiveBalanced).quality(85);
     ///
-    ///     let encoder = Encoder::new(Preset::BaselineBalanced).quality(75);
-    ///     let warnings = encoder.configure_sys(&mut cinfo, 640, 480).unwrap();
+    /// // Encode with C mozjpeg
+    /// let c_jpeg = encoder.to_c_mozjpeg().encode_rgb(&pixels, 64, 64)?;
     ///
-    ///     if warnings.has_icc_profile {
-    ///         // Handle ICC profile separately after jpeg_start_compress
-    ///     }
-    /// }
+    /// // Compare with Rust encoder
+    /// let rust_jpeg = encoder.encode_rgb(&pixels, 64, 64)?;
+    /// # Ok::<(), mozjpeg_rs::Error>(())
     /// ```
-    #[allow(unsafe_code)]
-    pub unsafe fn configure_sys(
-        &self,
-        cinfo: &mut mozjpeg_sys::jpeg_compress_struct,
-        width: u32,
-        height: u32,
-    ) -> std::result::Result<crate::compat::ConfigWarnings, crate::compat::ConfigError> {
-        use crate::compat::{ConfigError, ConfigWarnings};
-        use mozjpeg_sys::*;
-
-        let mut warnings = ConfigWarnings::default();
-
-        // Check for unsupported settings first
-        if self.custom_luma_qtable.is_some() || self.custom_chroma_qtable.is_some() {
-            return Err(ConfigError::CustomQuantTablesNotSupported);
+    pub fn to_c_mozjpeg(&self) -> crate::compat::CMozjpeg {
+        crate::compat::CMozjpeg {
+            quality: self.quality,
+            force_baseline: self.force_baseline,
+            subsampling: self.subsampling,
+            progressive: self.progressive,
+            optimize_huffman: self.optimize_huffman,
+            optimize_scans: self.optimize_scans,
+            trellis: self.trellis,
+            overshoot_deringing: self.overshoot_deringing,
+            smoothing: self.smoothing,
+            restart_interval: self.restart_interval,
+            quant_table_idx: self.quant_table_idx,
+            has_custom_qtables: self.custom_luma_qtable.is_some()
+                || self.custom_chroma_qtable.is_some(),
+            exif_data: self.exif_data.clone(),
+            icc_profile: self.icc_profile.clone(),
+            custom_markers: self.custom_markers.clone(),
         }
-
-        // Set image dimensions and colorspace
-        cinfo.image_width = width;
-        cinfo.image_height = height;
-        cinfo.input_components = 3;
-        cinfo.in_color_space = J_COLOR_SPACE::JCS_RGB;
-
-        // Initialize defaults (this sets JCP_MAX_COMPRESSION profile)
-        jpeg_set_defaults(cinfo);
-
-        // Set quant table index BEFORE jpeg_set_quality
-        let table_idx = self.quant_table_idx as i32;
-        jpeg_c_set_int_param(cinfo, J_INT_PARAM::JINT_BASE_QUANT_TBL_IDX, table_idx);
-
-        // Set quality (must come after quant table index)
-        jpeg_set_quality(
-            cinfo,
-            self.quality as i32,
-            if self.force_baseline { 1 } else { 0 },
-        );
-
-        // Set subsampling factors
-        let (h_samp, v_samp) = match self.subsampling {
-            Subsampling::S444 => (1, 1),
-            Subsampling::S422 => (2, 1),
-            Subsampling::S420 => (2, 2),
-            Subsampling::S440 => (1, 2),
-            Subsampling::Gray => {
-                // Grayscale: single component
-                cinfo.input_components = 1;
-                cinfo.in_color_space = J_COLOR_SPACE::JCS_GRAYSCALE;
-                (1, 1)
-            }
-        };
-
-        if self.subsampling != Subsampling::Gray {
-            (*cinfo.comp_info.offset(0)).h_samp_factor = h_samp;
-            (*cinfo.comp_info.offset(0)).v_samp_factor = v_samp;
-            (*cinfo.comp_info.offset(1)).h_samp_factor = 1;
-            (*cinfo.comp_info.offset(1)).v_samp_factor = 1;
-            (*cinfo.comp_info.offset(2)).h_samp_factor = 1;
-            (*cinfo.comp_info.offset(2)).v_samp_factor = 1;
-        }
-
-        // Huffman optimization
-        cinfo.optimize_coding = if self.optimize_huffman { 1 } else { 0 };
-
-        // Trellis quantization
-        jpeg_c_set_bool_param(
-            cinfo,
-            J_BOOLEAN_PARAM::JBOOLEAN_TRELLIS_QUANT,
-            if self.trellis.enabled { 1 } else { 0 },
-        );
-        jpeg_c_set_bool_param(
-            cinfo,
-            J_BOOLEAN_PARAM::JBOOLEAN_TRELLIS_QUANT_DC,
-            if self.trellis.dc_enabled { 1 } else { 0 },
-        );
-
-        // Overshoot deringing
-        jpeg_c_set_bool_param(
-            cinfo,
-            J_BOOLEAN_PARAM::JBOOLEAN_OVERSHOOT_DERINGING,
-            if self.overshoot_deringing { 1 } else { 0 },
-        );
-
-        // Smoothing factor
-        cinfo.smoothing_factor = self.smoothing as i32;
-
-        // Restart interval
-        cinfo.restart_interval = self.restart_interval as u32;
-
-        // optimize_scans MUST be set BEFORE jpeg_simple_progression
-        jpeg_c_set_bool_param(
-            cinfo,
-            J_BOOLEAN_PARAM::JBOOLEAN_OPTIMIZE_SCANS,
-            if self.optimize_scans { 1 } else { 0 },
-        );
-
-        // Progressive mode (must come AFTER optimize_scans)
-        if self.progressive {
-            jpeg_simple_progression(cinfo);
-        } else {
-            // Ensure baseline mode
-            cinfo.num_scans = 0;
-            cinfo.scan_info = std::ptr::null();
-        }
-
-        // Check for settings that require post-start handling
-        if self.exif_data.is_some() {
-            warnings.has_exif = true;
-        }
-        if self.icc_profile.is_some() {
-            warnings.has_icc_profile = true;
-        }
-        if !self.custom_markers.is_empty() {
-            warnings.has_custom_markers = true;
-        }
-
-        Ok(warnings)
-    }
-
-    /// Get the EXIF data configured on this encoder, if any.
-    ///
-    /// Use this to write EXIF data as an APP1 marker after `jpeg_start_compress`.
-    #[cfg(feature = "mozjpeg-sys-config")]
-    pub fn sys_exif_data(&self) -> Option<&[u8]> {
-        self.exif_data.as_deref()
-    }
-
-    /// Get the ICC profile configured on this encoder, if any.
-    ///
-    /// Use this with `jpeg_write_icc_profile` after `jpeg_start_compress`.
-    #[cfg(feature = "mozjpeg-sys-config")]
-    pub fn sys_icc_profile(&self) -> Option<&[u8]> {
-        self.icc_profile.as_deref()
-    }
-
-    /// Get the custom markers configured on this encoder.
-    ///
-    /// Use these with `jpeg_write_marker` after `jpeg_start_compress`.
-    #[cfg(feature = "mozjpeg-sys-config")]
-    pub fn sys_custom_markers(&self) -> &[(u8, Vec<u8>)] {
-        &self.custom_markers
-    }
-}
-
-#[cfg(all(test, feature = "mozjpeg-sys-config"))]
-#[allow(unsafe_code)]
-mod compat_tests {
-    use super::*;
-    use crate::Preset;
-
-    fn create_test_image(width: u32, height: u32) -> Vec<u8> {
-        vec![128u8; (width * height * 3) as usize]
-    }
-
-    #[test]
-    fn test_configure_sys_baseline_balanced() {
-        use mozjpeg_sys::*;
-        use std::ptr;
-
-        let rgb = create_test_image(64, 64);
-        let encoder = Encoder::new(Preset::BaselineBalanced).quality(75);
-
-        // Encode with Rust
-        let rust_jpeg = encoder
-            .clone()
-            .encode_rgb(&rgb, 64, 64)
-            .expect("Rust encode failed");
-
-        // Encode with C using our configuration
-        let c_jpeg = unsafe {
-            let mut cinfo: jpeg_compress_struct = std::mem::zeroed();
-            let mut jerr: jpeg_error_mgr = std::mem::zeroed();
-
-            cinfo.common.err = jpeg_std_error(&mut jerr);
-            jpeg_CreateCompress(
-                &mut cinfo,
-                JPEG_LIB_VERSION as i32,
-                std::mem::size_of::<jpeg_compress_struct>(),
-            );
-
-            let mut outbuffer: *mut u8 = ptr::null_mut();
-            let mut outsize: libc::c_ulong = 0;
-            jpeg_mem_dest(&mut cinfo, &mut outbuffer, &mut outsize);
-
-            // Configure using our method
-            let warnings = encoder
-                .configure_sys(&mut cinfo, 64, 64)
-                .expect("configure_sys failed");
-            assert!(!warnings.has_warnings());
-
-            jpeg_start_compress(&mut cinfo, 1);
-
-            let row_stride = 64 * 3;
-            let mut row_pointer: [*const u8; 1] = [ptr::null()];
-
-            while cinfo.next_scanline < cinfo.image_height {
-                let offset = cinfo.next_scanline as usize * row_stride;
-                row_pointer[0] = rgb.as_ptr().add(offset);
-                jpeg_write_scanlines(&mut cinfo, row_pointer.as_ptr(), 1);
-            }
-
-            jpeg_finish_compress(&mut cinfo);
-            let result = std::slice::from_raw_parts(outbuffer, outsize as usize).to_vec();
-            libc::free(outbuffer as *mut libc::c_void);
-            jpeg_destroy_compress(&mut cinfo);
-
-            result
-        };
-
-        // Compare sizes - should be very close
-        let diff_pct =
-            ((rust_jpeg.len() as f64 - c_jpeg.len() as f64) / c_jpeg.len() as f64) * 100.0;
-
-        println!(
-            "BaselineBalanced: Rust={} C={} diff={:.2}%",
-            rust_jpeg.len(),
-            c_jpeg.len(),
-            diff_pct
-        );
-
-        // Should be within 2% for identical settings
-        assert!(
-            diff_pct.abs() < 2.0,
-            "Size difference {:.2}% exceeds 2% threshold",
-            diff_pct
-        );
-
-        // Both should decode successfully
-        let mut decoder = jpeg_decoder::Decoder::new(&rust_jpeg[..]);
-        decoder.decode().expect("Rust JPEG should decode");
-
-        let mut decoder = jpeg_decoder::Decoder::new(&c_jpeg[..]);
-        decoder.decode().expect("C JPEG should decode");
-    }
-
-    #[test]
-    fn test_configure_sys_progressive_balanced() {
-        use mozjpeg_sys::*;
-        use std::ptr;
-
-        let rgb = create_test_image(256, 256);
-        let encoder = Encoder::new(Preset::ProgressiveBalanced).quality(85);
-
-        // Encode with Rust
-        let rust_jpeg = encoder
-            .clone()
-            .encode_rgb(&rgb, 256, 256)
-            .expect("Rust encode failed");
-
-        // Encode with C using our configuration
-        let c_jpeg = unsafe {
-            let mut cinfo: jpeg_compress_struct = std::mem::zeroed();
-            let mut jerr: jpeg_error_mgr = std::mem::zeroed();
-
-            cinfo.common.err = jpeg_std_error(&mut jerr);
-            jpeg_CreateCompress(
-                &mut cinfo,
-                JPEG_LIB_VERSION as i32,
-                std::mem::size_of::<jpeg_compress_struct>(),
-            );
-
-            let mut outbuffer: *mut u8 = ptr::null_mut();
-            let mut outsize: libc::c_ulong = 0;
-            jpeg_mem_dest(&mut cinfo, &mut outbuffer, &mut outsize);
-
-            encoder
-                .configure_sys(&mut cinfo, 256, 256)
-                .expect("configure_sys failed");
-
-            jpeg_start_compress(&mut cinfo, 1);
-
-            let row_stride = 256 * 3;
-            let mut row_pointer: [*const u8; 1] = [ptr::null()];
-
-            while cinfo.next_scanline < cinfo.image_height {
-                let offset = cinfo.next_scanline as usize * row_stride;
-                row_pointer[0] = rgb.as_ptr().add(offset);
-                jpeg_write_scanlines(&mut cinfo, row_pointer.as_ptr(), 1);
-            }
-
-            jpeg_finish_compress(&mut cinfo);
-            let result = std::slice::from_raw_parts(outbuffer, outsize as usize).to_vec();
-            libc::free(outbuffer as *mut libc::c_void);
-            jpeg_destroy_compress(&mut cinfo);
-
-            result
-        };
-
-        let diff_pct =
-            ((rust_jpeg.len() as f64 - c_jpeg.len() as f64) / c_jpeg.len() as f64) * 100.0;
-
-        println!(
-            "ProgressiveBalanced: Rust={} C={} diff={:.2}%",
-            rust_jpeg.len(),
-            c_jpeg.len(),
-            diff_pct
-        );
-
-        assert!(
-            diff_pct.abs() < 2.0,
-            "Size difference {:.2}% exceeds 2% threshold",
-            diff_pct
-        );
     }
 }
 

@@ -9,6 +9,13 @@
 //! - jpeg-decoder (pure Rust)
 //! - zune-jpeg (pure Rust, SIMD)
 //! - mozjpeg-sys (C mozjpeg)
+//!
+//! Image dimensions tested:
+//! - Around DCT block size (8): 7, 8, 9
+//! - Around 4:2:2/4:2:0 MCU (16): 15, 16, 17
+//! - Larger boundaries: 31, 32, 33, 63, 64, 65
+//! - Non-square: 7x17, 15x9, 17x31, etc.
+//! - Prime dimensions: 73, 97, 127
 
 use mozjpeg_rs::{Encoder, Preset, Subsampling};
 use std::time::Instant;
@@ -138,20 +145,6 @@ struct TestConfig {
     quality: u8,
 }
 
-impl TestConfig {
-    /// Check if this configuration has known decoder compatibility issues.
-    ///
-    /// ProgressiveBalanced at Q90+ uses the JCP_MAX_COMPRESSION scan script
-    /// with AC refinement scans (Ah > 0). Our AC refinement encoding produces
-    /// valid JPEG that C mozjpeg can decode, but some pure Rust decoders
-    /// (jpeg-decoder, zune-jpeg) fail to decode at high quality levels.
-    ///
-    /// This is a known issue tracked for future fix.
-    fn has_known_decoder_issues(&self) -> bool {
-        matches!(self.preset, Preset::ProgressiveBalanced) && self.quality >= 90
-    }
-}
-
 impl std::fmt::Display for TestConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let preset_name = match self.preset {
@@ -197,6 +190,170 @@ fn generate_configs() -> Vec<TestConfig> {
     configs
 }
 
+/// Test dimension pair (width, height).
+#[derive(Debug, Clone, Copy)]
+struct TestDimension {
+    width: u32,
+    height: u32,
+    description: &'static str,
+}
+
+impl std::fmt::Display for TestDimension {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}x{} ({})", self.width, self.height, self.description)
+    }
+}
+
+/// Generate test dimensions covering edge cases around DCT/MCU boundaries.
+///
+/// Key boundaries:
+/// - DCT block size: 8x8
+/// - 4:4:4 MCU: 8x8
+/// - 4:2:2 MCU: 16x8
+/// - 4:2:0 MCU: 16x16
+/// - 4:4:0 MCU: 8x16
+fn generate_test_dimensions() -> Vec<TestDimension> {
+    vec![
+        // Around DCT block size (8)
+        TestDimension {
+            width: 7,
+            height: 7,
+            description: "below DCT",
+        },
+        TestDimension {
+            width: 8,
+            height: 8,
+            description: "exact DCT",
+        },
+        TestDimension {
+            width: 9,
+            height: 9,
+            description: "above DCT",
+        },
+        // Around 4:2:2/4:2:0 MCU width (16)
+        TestDimension {
+            width: 15,
+            height: 15,
+            description: "below MCU",
+        },
+        TestDimension {
+            width: 16,
+            height: 16,
+            description: "exact MCU",
+        },
+        TestDimension {
+            width: 17,
+            height: 17,
+            description: "above MCU",
+        },
+        // Larger boundaries
+        TestDimension {
+            width: 31,
+            height: 31,
+            description: "2MCU-1",
+        },
+        TestDimension {
+            width: 32,
+            height: 32,
+            description: "2MCU",
+        },
+        TestDimension {
+            width: 33,
+            height: 33,
+            description: "2MCU+1",
+        },
+        TestDimension {
+            width: 63,
+            height: 63,
+            description: "4MCU-1",
+        },
+        TestDimension {
+            width: 64,
+            height: 64,
+            description: "4MCU",
+        },
+        TestDimension {
+            width: 65,
+            height: 65,
+            description: "4MCU+1",
+        },
+        // Non-square: stress different MCU alignments per axis
+        TestDimension {
+            width: 7,
+            height: 17,
+            description: "non-square 7x17",
+        },
+        TestDimension {
+            width: 17,
+            height: 7,
+            description: "non-square 17x7",
+        },
+        TestDimension {
+            width: 15,
+            height: 9,
+            description: "non-square 15x9",
+        },
+        TestDimension {
+            width: 9,
+            height: 15,
+            description: "non-square 9x15",
+        },
+        TestDimension {
+            width: 17,
+            height: 31,
+            description: "non-square 17x31",
+        },
+        TestDimension {
+            width: 31,
+            height: 17,
+            description: "non-square 31x17",
+        },
+        // Prime dimensions (no nice alignment)
+        TestDimension {
+            width: 73,
+            height: 73,
+            description: "prime 73",
+        },
+        TestDimension {
+            width: 97,
+            height: 97,
+            description: "prime 97",
+        },
+        TestDimension {
+            width: 127,
+            height: 127,
+            description: "prime 127",
+        },
+        TestDimension {
+            width: 73,
+            height: 97,
+            description: "prime non-square",
+        },
+        // Original test dimension (for regression)
+        TestDimension {
+            width: 256,
+            height: 256,
+            description: "original 256",
+        },
+        // Very small (edge cases)
+        TestDimension {
+            width: 1,
+            height: 1,
+            description: "minimum 1x1",
+        },
+        TestDimension {
+            width: 2,
+            height: 2,
+            description: "tiny 2x2",
+        },
+        TestDimension {
+            width: 3,
+            height: 5,
+            description: "tiny non-square",
+        },
+    ]
+}
+
 /// Create a test image with gradients and patterns.
 fn create_test_image(width: usize, height: usize) -> Vec<u8> {
     let mut pixels = vec![0u8; width * height * 3];
@@ -218,10 +375,34 @@ fn create_test_image(width: usize, height: usize) -> Vec<u8> {
 enum TestResult {
     /// All decoders passed
     AllDecoders,
-    /// Only mozjpeg-sys was tested (known decoder compatibility issue)
-    MozjpegOnly,
     /// Test failed
     Failed(String),
+}
+
+/// Determine max allowed decoder difference for given image/config.
+///
+/// For very small images with chroma subsampling, decoders use different
+/// upsampling algorithms which causes larger pixel differences. This is
+/// expected behavior, not an encoder bug.
+fn max_allowed_diff(width: u32, height: u32, subsampling: Subsampling) -> u8 {
+    // Check if chroma plane is pathologically small
+    let chroma_small = match subsampling {
+        Subsampling::S444 | Subsampling::Gray => false,
+        Subsampling::S422 => width < 8, // chroma width is half
+        Subsampling::S420 => width < 8 || height < 8, // chroma is half in both
+        Subsampling::S440 => height < 8, // chroma height is half
+    };
+
+    if chroma_small {
+        // Different chroma upsampling algorithms (bilinear vs simple replication)
+        // can differ by up to ~40 at very small sizes
+        50
+    } else {
+        // Normal case: IDCT differences are typically ≤4, but progressive
+        // with optimize_scans can show up to ~16 due to different coefficient
+        // ordering interpretations
+        16
+    }
 }
 
 /// Run a single test configuration.
@@ -235,14 +416,6 @@ fn run_test(config: &TestConfig, pixels: &[u8], width: u32, height: u32) -> Test
         Ok(j) => j,
         Err(e) => return TestResult::Failed(format!("encode failed: {}", e)),
     };
-
-    // For configs with known decoder issues, only test mozjpeg-sys
-    if config.has_known_decoder_issues() {
-        match decode_mozjpeg_sys(&jpeg) {
-            Ok(_) => return TestResult::MozjpegOnly,
-            Err(e) => return TestResult::Failed(format!("mozjpeg-sys: {}", e)),
-        }
-    }
 
     // Decode with all decoders
     let jpeg_decoder_result = match decode_jpeg_decoder(&jpeg) {
@@ -272,22 +445,23 @@ fn run_test(config: &TestConfig, pixels: &[u8], width: u32, height: u32) -> Test
         Err(e) => return TestResult::Failed(e),
     };
 
-    // Different IDCT implementations can produce differences of several pixels.
-    // This is expected and documented in the JPEG spec (IEEE 1180 allows ±1 per sample).
-    // In practice, differences up to ~4 are common between decoders.
-    // Progressive JPEGs with optimize_scans can show larger differences (~16)
-    // due to different coefficient ordering interpretations.
-    const MAX_ALLOWED_DIFF: u8 = 16;
-
+    let allowed = max_allowed_diff(width, height, config.subsampling);
     let max_diff = diff_jd_zune.max(diff_jd_moz).max(diff_zune_moz);
-    if max_diff > MAX_ALLOWED_DIFF {
+    if max_diff > allowed {
         return TestResult::Failed(format!(
             "decoder diff {} exceeds {} (jd-zune:{}, jd-moz:{}, zune-moz:{})",
-            max_diff, MAX_ALLOWED_DIFF, diff_jd_zune, diff_jd_moz, diff_zune_moz
+            max_diff, allowed, diff_jd_zune, diff_jd_moz, diff_zune_moz
         ));
     }
 
     TestResult::AllDecoders
+}
+
+/// A failure record including dimension and config info.
+struct FailureInfo {
+    dimension: TestDimension,
+    config: TestConfig,
+    error: String,
 }
 
 fn main() {
@@ -297,65 +471,73 @@ fn main() {
     println!("  - zune-jpeg (pure Rust, SIMD)");
     println!("  - mozjpeg-sys (C mozjpeg)\n");
 
-    // Create test image
-    let width = 256u32;
-    let height = 256u32;
-    let pixels = create_test_image(width as usize, height as usize);
-    println!("Test image: {}x{} RGB\n", width, height);
-
-    // Generate all configurations
+    // Generate test dimensions and configurations
+    let dimensions = generate_test_dimensions();
     let configs = generate_configs();
-    println!("Testing {} configurations...\n", configs.len());
+    let total_tests = dimensions.len() * configs.len();
+
+    println!(
+        "Test matrix: {} dimensions × {} configs = {} total tests\n",
+        dimensions.len(),
+        configs.len(),
+        total_tests
+    );
+
+    println!("Dimensions:");
+    for dim in &dimensions {
+        println!("  - {}", dim);
+    }
+    println!();
 
     let start = Instant::now();
-    let mut passed_all = 0;
-    let mut passed_mozjpeg_only = 0;
+    let mut passed = 0;
     let mut failed = 0;
-    let mut failures: Vec<(TestConfig, String)> = Vec::new();
+    let mut failures: Vec<FailureInfo> = Vec::new();
 
-    for config in &configs {
-        match run_test(config, &pixels, width, height) {
-            TestResult::AllDecoders => {
-                passed_all += 1;
-                print!(".");
-            }
-            TestResult::MozjpegOnly => {
-                passed_mozjpeg_only += 1;
-                print!("m"); // 'm' for mozjpeg-only
-            }
-            TestResult::Failed(e) => {
-                failed += 1;
-                print!("F");
-                failures.push((config.clone(), e));
-            }
-        }
-        // Flush after each test for progress indication
-        use std::io::Write;
+    // Use I/O for progress
+    use std::io::Write;
+
+    for (dim_idx, dim) in dimensions.iter().enumerate() {
+        // Create test image for this dimension
+        let pixels = create_test_image(dim.width as usize, dim.height as usize);
+
+        print!("\n[{}/{}] {} ", dim_idx + 1, dimensions.len(), dim);
         std::io::stdout().flush().unwrap();
+
+        for config in &configs {
+            match run_test(config, &pixels, dim.width, dim.height) {
+                TestResult::AllDecoders => {
+                    passed += 1;
+                    print!(".");
+                }
+                TestResult::Failed(e) => {
+                    failed += 1;
+                    print!("F");
+                    failures.push(FailureInfo {
+                        dimension: *dim,
+                        config: config.clone(),
+                        error: e,
+                    });
+                }
+            }
+            std::io::stdout().flush().unwrap();
+        }
     }
 
     let elapsed = start.elapsed();
     println!("\n");
 
     // Print results
-    let total_passed = passed_all + passed_mozjpeg_only;
     if failures.is_empty() {
         println!(
-            "PASSED: All {} configurations decoded successfully",
-            total_passed
+            "PASSED: All {} tests decoded successfully with all 3 decoders",
+            passed
         );
-        println!("  - {} tested with all decoders", passed_all);
-        if passed_mozjpeg_only > 0 {
-            println!(
-                "  - {} tested with mozjpeg-sys only (known AC refinement issue)",
-                passed_mozjpeg_only
-            );
-        }
     } else {
-        println!("FAILED: {} passed, {} failed\n", total_passed, failed);
+        println!("FAILED: {} passed, {} failed\n", passed, failed);
         println!("Failures:");
-        for (config, error) in &failures {
-            println!("  {} - {}", config, error);
+        for f in &failures {
+            println!("  {} @ {} - {}", f.config, f.dimension, f.error);
         }
     }
 
@@ -371,39 +553,112 @@ fn main() {
 mod tests {
     use super::*;
 
+    /// Helper to run a test with given dimensions and config.
+    fn assert_roundtrip(width: u32, height: u32, config: &TestConfig) {
+        let pixels = create_test_image(width as usize, height as usize);
+        match run_test(config, &pixels, width, height) {
+            TestResult::Failed(e) => {
+                panic!("{}x{} {} failed: {}", width, height, config, e)
+            }
+            TestResult::AllDecoders => {}
+        }
+    }
+
     #[test]
     fn test_decoder_roundtrip_baseline() {
-        let width = 64u32;
-        let height = 64u32;
-        let pixels = create_test_image(width as usize, height as usize);
-
         let config = TestConfig {
             preset: Preset::BaselineBalanced,
             subsampling: Subsampling::S420,
             quality: 75,
         };
-
-        match run_test(&config, &pixels, width, height) {
-            TestResult::Failed(e) => panic!("round-trip failed: {}", e),
-            _ => {}
-        }
+        assert_roundtrip(64, 64, &config);
     }
 
     #[test]
     fn test_decoder_roundtrip_progressive() {
-        let width = 64u32;
-        let height = 64u32;
-        let pixels = create_test_image(width as usize, height as usize);
-
         let config = TestConfig {
             preset: Preset::ProgressiveSmallest,
             subsampling: Subsampling::S444,
             quality: 90,
         };
+        assert_roundtrip(64, 64, &config);
+    }
 
-        match run_test(&config, &pixels, width, height) {
-            TestResult::Failed(e) => panic!("round-trip failed: {}", e),
-            _ => {}
+    /// Tests that ProgressiveBalanced Q90+ works with all decoders.
+    /// This was previously a known issue (GitHub #2) - now fixed.
+    #[test]
+    fn test_progressive_balanced_high_quality() {
+        let config = TestConfig {
+            preset: Preset::ProgressiveBalanced,
+            subsampling: Subsampling::S420,
+            quality: 95,
+        };
+        assert_roundtrip(64, 64, &config);
+        assert_roundtrip(256, 256, &config);
+    }
+
+    /// Test minimum dimension (1x1).
+    #[test]
+    fn test_minimum_dimension() {
+        let config = TestConfig {
+            preset: Preset::BaselineBalanced,
+            subsampling: Subsampling::S444,
+            quality: 75,
+        };
+        assert_roundtrip(1, 1, &config);
+    }
+
+    /// Test dimensions just below DCT block size (8).
+    #[test]
+    fn test_below_dct_block() {
+        let config = TestConfig {
+            preset: Preset::ProgressiveBalanced,
+            subsampling: Subsampling::S420,
+            quality: 85,
+        };
+        assert_roundtrip(7, 7, &config);
+        assert_roundtrip(7, 9, &config); // non-square
+    }
+
+    /// Test dimensions just below MCU size (16 for 4:2:0).
+    #[test]
+    fn test_below_mcu_420() {
+        let config = TestConfig {
+            preset: Preset::ProgressiveBalanced,
+            subsampling: Subsampling::S420,
+            quality: 85,
+        };
+        assert_roundtrip(15, 15, &config);
+        assert_roundtrip(17, 15, &config); // non-square across MCU
+    }
+
+    /// Test prime dimensions (no nice alignment).
+    #[test]
+    fn test_prime_dimensions() {
+        let config = TestConfig {
+            preset: Preset::ProgressiveSmallest,
+            subsampling: Subsampling::S422,
+            quality: 80,
+        };
+        assert_roundtrip(73, 97, &config);
+    }
+
+    /// Run all presets with a challenging non-aligned dimension.
+    #[test]
+    fn test_all_presets_non_aligned() {
+        let presets = [
+            Preset::BaselineFastest,
+            Preset::BaselineBalanced,
+            Preset::ProgressiveBalanced,
+            Preset::ProgressiveSmallest,
+        ];
+        for preset in presets {
+            let config = TestConfig {
+                preset,
+                subsampling: Subsampling::S420,
+                quality: 90,
+            };
+            assert_roundtrip(17, 31, &config);
         }
     }
 }

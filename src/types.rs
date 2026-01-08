@@ -76,6 +76,168 @@ impl PixelDensity {
 }
 
 // =============================================================================
+// Resource Estimation
+// =============================================================================
+
+/// Estimated resource usage for an encoding operation.
+///
+/// Use [`Encoder::estimate_resources()`] to get these estimates before encoding.
+/// This is useful for:
+/// - Scheduling work across multiple threads
+/// - Enforcing memory limits
+/// - Providing progress feedback to users
+///
+/// # Example
+///
+/// ```
+/// use mozjpeg_rs::{Encoder, Preset};
+///
+/// let encoder = Encoder::new(Preset::ProgressiveBalanced).quality(85);
+/// let estimate = encoder.estimate_resources(1920, 1080);
+///
+/// println!("Peak memory: {} MB", estimate.peak_memory_bytes / 1_000_000);
+/// println!("CPU cost: {:.1}x baseline", estimate.cpu_cost_multiplier);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResourceEstimate {
+    /// Peak memory usage in bytes.
+    ///
+    /// This includes:
+    /// - Working buffers for color conversion and DCT
+    /// - Block storage for progressive/optimized modes
+    /// - Estimated output buffer size
+    ///
+    /// Does NOT include the input pixel buffer (you already have that).
+    pub peak_memory_bytes: usize,
+
+    /// Relative CPU cost multiplier.
+    ///
+    /// Reference: `Preset::BaselineFastest` at Q75 = 1.0
+    ///
+    /// Higher values indicate more CPU work. Factors that increase this:
+    /// - Trellis quantization: ~3.5x
+    /// - DC trellis: +0.5x
+    /// - Progressive mode: +1.5x
+    /// - optimize_scans: +3.0x
+    /// - Higher quality (Q85+): increases trellis work
+    pub cpu_cost_multiplier: f64,
+
+    /// Estimated number of 8x8 blocks to process.
+    ///
+    /// For RGB: `ceil(width/8) * ceil(height/8) * 3` (Y, Cb, Cr)
+    /// For grayscale: `ceil(width/8) * ceil(height/8)`
+    pub block_count: usize,
+}
+
+// =============================================================================
+// Encoder Limits
+// =============================================================================
+
+/// Resource limits for the encoder.
+///
+/// Use this to restrict encoding operations by dimensions, memory usage,
+/// or metadata size. All limits default to 0 (disabled).
+///
+/// # Example
+///
+/// ```
+/// use mozjpeg_rs::{Encoder, Preset, Limits};
+///
+/// // Create limits for a thumbnail service
+/// let limits = Limits::default()
+///     .max_width(4096)
+///     .max_height(4096)
+///     .max_pixel_count(16_000_000)  // 16 megapixels
+///     .max_alloc_bytes(100 * 1024 * 1024);  // 100 MB
+///
+/// let encoder = Encoder::new(Preset::BaselineFastest)
+///     .limits(limits);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Limits {
+    /// Maximum allowed image width in pixels.
+    /// Set to 0 to disable (default).
+    pub max_width: u32,
+
+    /// Maximum allowed image height in pixels.
+    /// Set to 0 to disable (default).
+    pub max_height: u32,
+
+    /// Maximum allowed pixel count (width × height).
+    /// Set to 0 to disable (default).
+    ///
+    /// This is useful for limiting total image area regardless of aspect ratio.
+    /// For example, `max_pixel_count(16_000_000)` limits to ~16 megapixels.
+    pub max_pixel_count: u64,
+
+    /// Maximum estimated memory allocation in bytes.
+    /// Set to 0 to disable (default).
+    ///
+    /// The encoder estimates memory usage before allocating and rejects
+    /// images that would exceed this limit.
+    pub max_alloc_bytes: usize,
+
+    /// Maximum ICC profile size in bytes.
+    /// Set to 0 to disable (default).
+    ///
+    /// Large ICC profiles can significantly increase JPEG file size.
+    /// Common profiles like sRGB are ~3KB, but some can exceed 1MB.
+    pub max_icc_profile_bytes: usize,
+}
+
+impl Limits {
+    /// Create limits with all checks disabled.
+    pub const fn none() -> Self {
+        Self {
+            max_width: 0,
+            max_height: 0,
+            max_pixel_count: 0,
+            max_alloc_bytes: 0,
+            max_icc_profile_bytes: 0,
+        }
+    }
+
+    /// Set maximum allowed image width.
+    pub const fn max_width(mut self, width: u32) -> Self {
+        self.max_width = width;
+        self
+    }
+
+    /// Set maximum allowed image height.
+    pub const fn max_height(mut self, height: u32) -> Self {
+        self.max_height = height;
+        self
+    }
+
+    /// Set maximum allowed pixel count (width × height).
+    pub const fn max_pixel_count(mut self, count: u64) -> Self {
+        self.max_pixel_count = count;
+        self
+    }
+
+    /// Set maximum estimated memory allocation.
+    pub const fn max_alloc_bytes(mut self, bytes: usize) -> Self {
+        self.max_alloc_bytes = bytes;
+        self
+    }
+
+    /// Set maximum ICC profile size.
+    pub const fn max_icc_profile_bytes(mut self, bytes: usize) -> Self {
+        self.max_icc_profile_bytes = bytes;
+        self
+    }
+
+    /// Check if any limits are enabled.
+    pub const fn has_limits(&self) -> bool {
+        self.max_width > 0
+            || self.max_height > 0
+            || self.max_pixel_count > 0
+            || self.max_alloc_bytes > 0
+            || self.max_icc_profile_bytes > 0
+    }
+}
+
+// =============================================================================
 // Encoder Presets
 // =============================================================================
 

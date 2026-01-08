@@ -57,6 +57,42 @@ pub enum Error {
     IoError(String),
     /// Memory allocation failed
     AllocationFailed,
+    /// Encoding was cancelled by the caller
+    Cancelled,
+    /// Encoding exceeded the timeout duration
+    TimedOut,
+    /// Image dimensions exceed the configured maximum
+    DimensionLimitExceeded {
+        /// Requested width
+        width: u32,
+        /// Requested height
+        height: u32,
+        /// Maximum allowed width
+        max_width: u32,
+        /// Maximum allowed height
+        max_height: u32,
+    },
+    /// Estimated memory usage exceeds the configured limit
+    AllocationLimitExceeded {
+        /// Estimated memory in bytes
+        estimated: usize,
+        /// Maximum allowed memory in bytes
+        limit: usize,
+    },
+    /// Pixel count (width × height) exceeds the configured limit
+    PixelCountExceeded {
+        /// Actual pixel count
+        pixel_count: u64,
+        /// Maximum allowed pixel count
+        limit: u64,
+    },
+    /// ICC profile size exceeds the configured limit
+    IccProfileTooLarge {
+        /// Actual ICC profile size in bytes
+        size: usize,
+        /// Maximum allowed size in bytes
+        limit: usize,
+    },
 }
 
 impl fmt::Display for Error {
@@ -110,6 +146,41 @@ impl fmt::Display for Error {
             }
             Error::AllocationFailed => {
                 write!(f, "Memory allocation failed")
+            }
+            Error::Cancelled => {
+                write!(f, "Encoding was cancelled")
+            }
+            Error::TimedOut => {
+                write!(f, "Encoding timed out")
+            }
+            Error::DimensionLimitExceeded {
+                width,
+                height,
+                max_width,
+                max_height,
+            } => {
+                write!(
+                    f,
+                    "Image dimensions {}x{} exceed limit {}x{}",
+                    width, height, max_width, max_height
+                )
+            }
+            Error::AllocationLimitExceeded { estimated, limit } => {
+                write!(
+                    f,
+                    "Estimated memory {} bytes exceeds limit {} bytes",
+                    estimated, limit
+                )
+            }
+            Error::PixelCountExceeded { pixel_count, limit } => {
+                write!(f, "Pixel count {} exceeds limit {}", pixel_count, limit)
+            }
+            Error::IccProfileTooLarge { size, limit } => {
+                write!(
+                    f,
+                    "ICC profile size {} bytes exceeds limit {} bytes",
+                    size, limit
+                )
             }
         }
     }
@@ -196,6 +267,24 @@ mod tests {
             ),
             (Error::IoError("disk full".into()), "I/O error: disk full"),
             (Error::AllocationFailed, "Memory allocation failed"),
+            (Error::Cancelled, "Encoding was cancelled"),
+            (Error::TimedOut, "Encoding timed out"),
+            (
+                Error::DimensionLimitExceeded {
+                    width: 5000,
+                    height: 3000,
+                    max_width: 4096,
+                    max_height: 4096,
+                },
+                "Image dimensions 5000x3000 exceed limit 4096x4096",
+            ),
+            (
+                Error::AllocationLimitExceeded {
+                    estimated: 100_000_000,
+                    limit: 50_000_000,
+                },
+                "Estimated memory 100000000 bytes exceeds limit 50000000 bytes",
+            ),
         ];
 
         for (error, expected_msg) in errors {

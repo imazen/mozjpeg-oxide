@@ -419,6 +419,47 @@ pub use types::DensityUnit;
 /// ```
 pub use types::TrellisConfig;
 
+/// Estimated resource usage for an encoding operation.
+///
+/// Use [`Encoder::estimate_resources()`] to predict memory and CPU requirements
+/// before encoding. Useful for scheduling, resource limits, or progress feedback.
+///
+/// # Example
+///
+/// ```no_run
+/// use mozjpeg_rs::{Encoder, Preset};
+///
+/// let encoder = Encoder::new(Preset::ProgressiveBalanced).quality(85);
+/// let estimate = encoder.estimate_resources(1920, 1080);
+///
+/// println!("Peak memory: {} MB", estimate.peak_memory_bytes / 1_000_000);
+/// println!("CPU cost: {:.1}x baseline", estimate.cpu_cost_multiplier);
+/// println!("Blocks to process: {}", estimate.block_count);
+/// ```
+pub use types::ResourceEstimate;
+
+/// Resource limits for the encoder.
+///
+/// Use this to restrict encoding operations by dimensions, memory usage,
+/// or metadata size. All limits default to 0 (disabled).
+///
+/// # Example
+///
+/// ```
+/// use mozjpeg_rs::{Encoder, Preset, Limits};
+///
+/// // Create limits for a thumbnail service
+/// let limits = Limits::default()
+///     .max_width(4096)
+///     .max_height(4096)
+///     .max_pixel_count(16_000_000)  // 16 megapixels
+///     .max_alloc_bytes(100 * 1024 * 1024);  // 100 MB
+///
+/// let encoder = Encoder::new(Preset::BaselineFastest)
+///     .limits(limits);
+/// ```
+pub use types::Limits;
+
 /// Quantization table preset.
 ///
 /// mozjpeg provides 9 different quantization tables optimized for different

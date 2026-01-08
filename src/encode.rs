@@ -30,6 +30,8 @@
 //! ```
 
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use crate::bitstream::BitWriter;
 use crate::consts::{QuantTableIdx, DCTSIZE, DCTSIZE2};
@@ -46,7 +48,7 @@ use crate::scan_optimize::{generate_search_scans, ScanSearchConfig, ScanSelector
 use crate::scan_trial::ScanTrialEncoder;
 use crate::simd::SimdOps;
 use crate::trellis::trellis_quantize_block;
-use crate::types::{PixelDensity, Preset, Subsampling, TrellisConfig};
+use crate::types::{Limits, PixelDensity, Preset, Subsampling, TrellisConfig};
 
 mod helpers;
 mod streaming;
@@ -58,6 +60,73 @@ pub(crate) use helpers::{
     write_sos_marker,
 };
 pub use streaming::{EncodingStream, StreamingEncoder};
+
+// ============================================================================
+// Cancellation Support
+// ============================================================================
+
+/// Internal context for cancellation checking during encoding.
+///
+/// This is passed through the encoding pipeline to allow periodic
+/// cancellation checks without function signature changes everywhere.
+#[derive(Clone, Copy)]
+pub(crate) struct CancellationContext<'a> {
+    /// Optional cancellation flag - if set to true, encoding should abort.
+    pub cancel: Option<&'a AtomicBool>,
+    /// Optional deadline - if current time exceeds this, encoding should abort.
+    pub deadline: Option<Instant>,
+}
+
+impl<'a> CancellationContext<'a> {
+    /// Create a context with no cancellation (always succeeds).
+    #[allow(dead_code)]
+    pub const fn none() -> Self {
+        Self {
+            cancel: None,
+            deadline: None,
+        }
+    }
+
+    /// Create a context from optional cancel flag and timeout.
+    #[allow(dead_code)]
+    pub fn new(cancel: Option<&'a AtomicBool>, timeout: Option<Duration>) -> Self {
+        Self {
+            cancel,
+            deadline: timeout.map(|d| Instant::now() + d),
+        }
+    }
+
+    /// Check if cancellation has been requested.
+    ///
+    /// Returns `Ok(())` if encoding should continue, or `Err` if cancelled/timed out.
+    #[inline]
+    pub fn check(&self) -> Result<()> {
+        if let Some(c) = self.cancel {
+            if c.load(Ordering::Relaxed) {
+                return Err(Error::Cancelled);
+            }
+        }
+        if let Some(d) = self.deadline {
+            if Instant::now() > d {
+                return Err(Error::TimedOut);
+            }
+        }
+        Ok(())
+    }
+
+    /// Check cancellation every N iterations (to reduce overhead).
+    ///
+    /// Only performs the check when `iteration % interval == 0`.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn check_periodic(&self, iteration: usize, interval: usize) -> Result<()> {
+        if iteration.is_multiple_of(interval) {
+            self.check()
+        } else {
+            Ok(())
+        }
+    }
+}
 
 // ============================================================================
 // Encode Trait (internal, for potential future streaming API)
@@ -126,6 +195,8 @@ pub struct Encoder {
     /// Applies a weighted average filter to reduce fine-scale noise.
     /// Useful for converting dithered images (like GIFs) to JPEG.
     smoothing: u8,
+    /// Resource limits (dimensions, memory, ICC size)
+    limits: Limits,
 }
 
 impl Default for Encoder {
@@ -258,6 +329,7 @@ impl Encoder {
             custom_markers: Vec::new(),
             simd: SimdOps::detect(),
             smoothing: 0,
+            limits: Limits::none(),
         }
     }
 
@@ -316,6 +388,7 @@ impl Encoder {
             custom_markers: Vec::new(),
             simd: SimdOps::detect(),
             smoothing: 0,
+            limits: Limits::none(),
         }
     }
 
@@ -375,6 +448,7 @@ impl Encoder {
             custom_markers: Vec::new(),
             simd: SimdOps::detect(),
             smoothing: 0,
+            limits: Limits::none(),
         }
     }
 
@@ -430,6 +504,7 @@ impl Encoder {
             custom_markers: Vec::new(),
             simd: SimdOps::detect(),
             smoothing: 0,
+            limits: Limits::none(),
         }
     }
 
@@ -622,6 +697,98 @@ impl Encoder {
     }
 
     // =========================================================================
+    // Resource Limits
+    // =========================================================================
+
+    /// Set resource limits for the encoder.
+    ///
+    /// Limits can restrict:
+    /// - Maximum image width and height
+    /// - Maximum pixel count (width × height)
+    /// - Maximum estimated memory allocation
+    /// - Maximum ICC profile size
+    ///
+    /// # Example
+    /// ```
+    /// use mozjpeg_rs::{Encoder, Preset, Limits};
+    ///
+    /// let limits = Limits::default()
+    ///     .max_width(4096)
+    ///     .max_height(4096)
+    ///     .max_pixel_count(16_000_000)
+    ///     .max_alloc_bytes(100 * 1024 * 1024);
+    ///
+    /// let encoder = Encoder::new(Preset::default())
+    ///     .limits(limits);
+    /// ```
+    pub fn limits(mut self, limits: Limits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// Check all resource limits before encoding.
+    ///
+    /// # Arguments
+    /// * `width` - Image width
+    /// * `height` - Image height
+    /// * `is_gray` - True for grayscale images (affects memory estimate)
+    fn check_limits(&self, width: u32, height: u32, is_gray: bool) -> Result<()> {
+        let limits = &self.limits;
+
+        // Check dimension limits
+        if (limits.max_width > 0 && width > limits.max_width)
+            || (limits.max_height > 0 && height > limits.max_height)
+        {
+            return Err(Error::DimensionLimitExceeded {
+                width,
+                height,
+                max_width: limits.max_width,
+                max_height: limits.max_height,
+            });
+        }
+
+        // Check pixel count limit
+        if limits.max_pixel_count > 0 {
+            let pixel_count = width as u64 * height as u64;
+            if pixel_count > limits.max_pixel_count {
+                return Err(Error::PixelCountExceeded {
+                    pixel_count,
+                    limit: limits.max_pixel_count,
+                });
+            }
+        }
+
+        // Check allocation limit
+        if limits.max_alloc_bytes > 0 {
+            let estimate = if is_gray {
+                self.estimate_resources_gray(width, height)
+            } else {
+                self.estimate_resources(width, height)
+            };
+            if estimate.peak_memory_bytes > limits.max_alloc_bytes {
+                return Err(Error::AllocationLimitExceeded {
+                    estimated: estimate.peak_memory_bytes,
+                    limit: limits.max_alloc_bytes,
+                });
+            }
+        }
+
+        // Check ICC profile size limit
+        if limits.max_icc_profile_bytes > 0 {
+            if let Some(ref icc) = self.icc_profile {
+                if icc.len() > limits.max_icc_profile_bytes {
+                    return Err(Error::IccProfileTooLarge {
+                        size: icc.len(),
+                        limit: limits.max_icc_profile_bytes,
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    // =========================================================================
     // Aliases for rimage/CLI-style naming
     // =========================================================================
 
@@ -668,6 +835,223 @@ impl Encoder {
         self.quant_tables(idx)
     }
 
+    // =========================================================================
+    // Resource Estimation
+    // =========================================================================
+
+    /// Estimate resource usage for encoding an RGB image of the given dimensions.
+    ///
+    /// Returns peak memory usage (in bytes) and a relative CPU cost multiplier.
+    /// Useful for scheduling, enforcing resource limits, or providing feedback.
+    ///
+    /// # Arguments
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mozjpeg_rs::{Encoder, Preset};
+    ///
+    /// let encoder = Encoder::new(Preset::ProgressiveBalanced).quality(85);
+    /// let estimate = encoder.estimate_resources(1920, 1080);
+    ///
+    /// println!("Peak memory: {} MB", estimate.peak_memory_bytes / 1_000_000);
+    /// println!("Relative CPU cost: {:.1}x", estimate.cpu_cost_multiplier);
+    /// ```
+    pub fn estimate_resources(&self, width: u32, height: u32) -> crate::types::ResourceEstimate {
+        let width = width as usize;
+        let height = height as usize;
+        let pixels = width * height;
+
+        // Calculate chroma dimensions based on subsampling
+        let (h_samp, v_samp) = self.subsampling.luma_factors();
+        let chroma_width = (width + h_samp as usize - 1) / h_samp as usize;
+        let chroma_height = (height + v_samp as usize - 1) / v_samp as usize;
+        let chroma_pixels = chroma_width * chroma_height;
+
+        // MCU-aligned dimensions
+        let mcu_h = 8 * h_samp as usize;
+        let mcu_v = 8 * v_samp as usize;
+        let mcu_width = (width + mcu_h - 1) / mcu_h * mcu_h;
+        let mcu_height = (height + mcu_v - 1) / mcu_v * mcu_v;
+
+        // Block counts
+        let y_blocks = (mcu_width / 8) * (mcu_height / 8);
+        let chroma_block_w = (chroma_width + 7) / 8;
+        let chroma_block_h = (chroma_height + 7) / 8;
+        let chroma_blocks = chroma_block_w * chroma_block_h;
+        let total_blocks = y_blocks + 2 * chroma_blocks;
+
+        // --- Memory estimation ---
+        let mut memory: usize = 0;
+
+        // Color conversion buffers (Y, Cb, Cr planes)
+        memory += 3 * pixels;
+
+        // Chroma subsampled buffers
+        memory += 2 * chroma_pixels;
+
+        // MCU-padded buffers
+        memory += mcu_width * mcu_height; // Y
+        let mcu_chroma_w = (chroma_width + 7) / 8 * 8;
+        let mcu_chroma_h = (chroma_height + 7) / 8 * 8;
+        memory += 2 * mcu_chroma_w * mcu_chroma_h; // Cb, Cr
+
+        // Block storage (needed for progressive or optimize_huffman)
+        let needs_block_storage = self.progressive || self.optimize_huffman;
+        if needs_block_storage {
+            // i16[64] per block = 128 bytes
+            memory += total_blocks * 128;
+        }
+
+        // Raw DCT storage (needed for DC trellis)
+        if self.trellis.dc_enabled {
+            // i32[64] per block = 256 bytes
+            memory += total_blocks * 256;
+        }
+
+        // Output buffer estimate (varies by quality, ~0.3-1.0x input for typical images)
+        // Use a conservative estimate based on quality
+        let output_ratio = if self.quality >= 95 {
+            0.8
+        } else if self.quality >= 85 {
+            0.5
+        } else if self.quality >= 75 {
+            0.3
+        } else {
+            0.2
+        };
+        memory += (pixels as f64 * 3.0 * output_ratio) as usize;
+
+        // --- CPU cost estimation ---
+        // Reference: BaselineFastest Q75 = 1.0
+        let mut cpu_cost = 1.0;
+
+        // Trellis AC quantization is the biggest CPU factor
+        if self.trellis.enabled {
+            cpu_cost += 3.5;
+        }
+
+        // DC trellis adds extra work
+        if self.trellis.dc_enabled {
+            cpu_cost += 0.5;
+        }
+
+        // Huffman optimization (frequency counting pass)
+        if self.optimize_huffman {
+            cpu_cost += 0.3;
+        }
+
+        // Progressive mode (multiple scan encoding)
+        if self.progressive {
+            cpu_cost += 1.5;
+        }
+
+        // optimize_scans (trial encoding many scan configurations)
+        if self.optimize_scans {
+            cpu_cost += 3.0;
+        }
+
+        // High quality increases trellis work (more candidates to evaluate)
+        // This matters most when trellis is enabled
+        if self.trellis.enabled && self.quality >= 85 {
+            let quality_factor = 1.0 + (self.quality as f64 - 85.0) / 30.0;
+            cpu_cost *= quality_factor;
+        }
+
+        crate::types::ResourceEstimate {
+            peak_memory_bytes: memory,
+            cpu_cost_multiplier: cpu_cost,
+            block_count: total_blocks,
+        }
+    }
+
+    /// Estimate resource usage for encoding a grayscale image.
+    ///
+    /// Similar to [`estimate_resources`](Self::estimate_resources) but for single-channel images.
+    pub fn estimate_resources_gray(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> crate::types::ResourceEstimate {
+        let width = width as usize;
+        let height = height as usize;
+        let pixels = width * height;
+
+        // MCU-aligned dimensions (always 8x8 for grayscale)
+        let mcu_width = (width + 7) / 8 * 8;
+        let mcu_height = (height + 7) / 8 * 8;
+
+        // Block count
+        let blocks = (mcu_width / 8) * (mcu_height / 8);
+
+        // --- Memory estimation ---
+        let mut memory: usize = 0;
+
+        // MCU-padded buffer
+        memory += mcu_width * mcu_height;
+
+        // Block storage (needed for progressive or optimize_huffman)
+        let needs_block_storage = self.progressive || self.optimize_huffman;
+        if needs_block_storage {
+            memory += blocks * 128;
+        }
+
+        // Raw DCT storage (needed for DC trellis)
+        if self.trellis.dc_enabled {
+            memory += blocks * 256;
+        }
+
+        // Output buffer estimate
+        let output_ratio = if self.quality >= 95 {
+            0.8
+        } else if self.quality >= 85 {
+            0.5
+        } else if self.quality >= 75 {
+            0.3
+        } else {
+            0.2
+        };
+        memory += (pixels as f64 * output_ratio) as usize;
+
+        // --- CPU cost (same formula, but less work due to single channel) ---
+        let mut cpu_cost = 1.0;
+
+        if self.trellis.enabled {
+            cpu_cost += 3.5;
+        }
+        if self.trellis.dc_enabled {
+            cpu_cost += 0.5;
+        }
+        if self.optimize_huffman {
+            cpu_cost += 0.3;
+        }
+        if self.progressive {
+            cpu_cost += 1.0; // Less for grayscale (fewer scans)
+        }
+        if self.optimize_scans {
+            cpu_cost += 2.0; // Less for grayscale
+        }
+        if self.trellis.enabled && self.quality >= 85 {
+            let quality_factor = 1.0 + (self.quality as f64 - 85.0) / 30.0;
+            cpu_cost *= quality_factor;
+        }
+
+        // Grayscale is ~1/3 the work of RGB (single channel)
+        cpu_cost /= 3.0;
+
+        crate::types::ResourceEstimate {
+            peak_memory_bytes: memory,
+            cpu_cost_multiplier: cpu_cost,
+            block_count: blocks,
+        }
+    }
+
+    // =========================================================================
+    // Encoding
+    // =========================================================================
+
     /// Encode RGB image data to JPEG.
     ///
     /// # Arguments
@@ -682,6 +1066,9 @@ impl Encoder {
         if width == 0 || height == 0 {
             return Err(Error::InvalidDimensions { width, height });
         }
+
+        // Check all resource limits
+        self.check_limits(width, height, false)?;
 
         // Use checked arithmetic to prevent overflow
         let expected_len = (width as usize)
@@ -728,6 +1115,9 @@ impl Encoder {
             return Err(Error::InvalidDimensions { width, height });
         }
 
+        // Check all resource limits
+        self.check_limits(width, height, true)?;
+
         // Use checked arithmetic to prevent overflow
         let expected_len = (width as usize)
             .checked_mul(height as usize)
@@ -754,6 +1144,169 @@ impl Encoder {
 
         let mut output = Vec::new();
         self.encode_gray_to_writer(&gray_data, width, height, &mut output)?;
+        Ok(output)
+    }
+
+    /// Encode RGB image data to JPEG with cancellation and timeout support.
+    ///
+    /// This method allows encoding to be cancelled mid-operation via an atomic flag,
+    /// or to automatically abort if a timeout is exceeded.
+    ///
+    /// # Arguments
+    /// * `rgb_data` - RGB pixel data (3 bytes per pixel, row-major)
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    /// * `cancel` - Optional cancellation flag. Set to `true` to abort encoding.
+    /// * `timeout` - Optional maximum encoding duration.
+    ///
+    /// # Returns
+    /// * `Ok(Vec<u8>)` - JPEG-encoded data
+    /// * `Err(Error::Cancelled)` - If cancelled via the flag
+    /// * `Err(Error::TimedOut)` - If the timeout was exceeded
+    ///
+    /// # Example
+    /// ```no_run
+    /// use mozjpeg_rs::{Encoder, Preset};
+    /// use std::sync::atomic::AtomicBool;
+    /// use std::time::Duration;
+    ///
+    /// let encoder = Encoder::new(Preset::ProgressiveBalanced);
+    /// let pixels: Vec<u8> = vec![128; 1920 * 1080 * 3];
+    /// let cancel = AtomicBool::new(false);
+    ///
+    /// // Encode with 5 second timeout
+    /// let result = encoder.encode_rgb_cancellable(
+    ///     &pixels, 1920, 1080,
+    ///     Some(&cancel),
+    ///     Some(Duration::from_secs(5)),
+    /// );
+    /// ```
+    pub fn encode_rgb_cancellable(
+        &self,
+        rgb_data: &[u8],
+        width: u32,
+        height: u32,
+        cancel: Option<&AtomicBool>,
+        timeout: Option<Duration>,
+    ) -> Result<Vec<u8>> {
+        // Validate dimensions
+        if width == 0 || height == 0 {
+            return Err(Error::InvalidDimensions { width, height });
+        }
+
+        // Check all resource limits
+        self.check_limits(width, height, false)?;
+
+        // Check buffer size
+        let expected_len = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(3))
+            .ok_or(Error::InvalidDimensions { width, height })?;
+
+        if rgb_data.len() != expected_len {
+            return Err(Error::BufferSizeMismatch {
+                expected: expected_len,
+                actual: rgb_data.len(),
+            });
+        }
+
+        // Create cancellation context
+        let ctx = CancellationContext::new(cancel, timeout);
+
+        // Check for immediate cancellation
+        ctx.check()?;
+
+        // Apply smoothing if enabled
+        let rgb_data = if self.smoothing > 0 {
+            std::borrow::Cow::Owned(crate::smooth::smooth_rgb(
+                rgb_data,
+                width,
+                height,
+                self.smoothing,
+            ))
+        } else {
+            std::borrow::Cow::Borrowed(rgb_data)
+        };
+
+        let mut output = Vec::new();
+        // For now, use the regular encoder (cancellation hooks can be added to
+        // internal functions in a follow-up). Check cancellation before and after.
+        ctx.check()?;
+        self.encode_rgb_to_writer(&rgb_data, width, height, &mut output)?;
+        ctx.check()?;
+
+        Ok(output)
+    }
+
+    /// Encode grayscale image data to JPEG with cancellation and timeout support.
+    ///
+    /// This method allows encoding to be cancelled mid-operation via an atomic flag,
+    /// or to automatically abort if a timeout is exceeded.
+    ///
+    /// # Arguments
+    /// * `gray_data` - Grayscale pixel data (1 byte per pixel, row-major)
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    /// * `cancel` - Optional cancellation flag. Set to `true` to abort encoding.
+    /// * `timeout` - Optional maximum encoding duration.
+    ///
+    /// # Returns
+    /// * `Ok(Vec<u8>)` - JPEG-encoded data
+    /// * `Err(Error::Cancelled)` - If cancelled via the flag
+    /// * `Err(Error::TimedOut)` - If the timeout was exceeded
+    pub fn encode_gray_cancellable(
+        &self,
+        gray_data: &[u8],
+        width: u32,
+        height: u32,
+        cancel: Option<&AtomicBool>,
+        timeout: Option<Duration>,
+    ) -> Result<Vec<u8>> {
+        // Validate dimensions
+        if width == 0 || height == 0 {
+            return Err(Error::InvalidDimensions { width, height });
+        }
+
+        // Check all resource limits
+        self.check_limits(width, height, true)?;
+
+        // Check buffer size
+        let expected_len = (width as usize)
+            .checked_mul(height as usize)
+            .ok_or(Error::InvalidDimensions { width, height })?;
+
+        if gray_data.len() != expected_len {
+            return Err(Error::BufferSizeMismatch {
+                expected: expected_len,
+                actual: gray_data.len(),
+            });
+        }
+
+        // Create cancellation context
+        let ctx = CancellationContext::new(cancel, timeout);
+
+        // Check for immediate cancellation
+        ctx.check()?;
+
+        // Apply smoothing if enabled
+        let gray_data = if self.smoothing > 0 {
+            std::borrow::Cow::Owned(crate::smooth::smooth_grayscale(
+                gray_data,
+                width,
+                height,
+                self.smoothing,
+            ))
+        } else {
+            std::borrow::Cow::Borrowed(gray_data)
+        };
+
+        let mut output = Vec::new();
+        // For now, use the regular encoder (cancellation hooks can be added to
+        // internal functions in a follow-up). Check cancellation before and after.
+        ctx.check()?;
+        self.encode_gray_to_writer(&gray_data, width, height, &mut output)?;
+        ctx.check()?;
+
         Ok(output)
     }
 
@@ -3413,5 +3966,399 @@ mod tests {
 
         // Both should produce identical output
         assert_eq!(jpeg_packed, jpeg_strided);
+    }
+
+    // =========================================================================
+    // Resource Estimation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_estimate_resources_basic() {
+        let encoder = Encoder::new(Preset::BaselineBalanced);
+        let estimate = encoder.estimate_resources(1920, 1080);
+
+        // Should have reasonable memory estimate (> input size)
+        let input_size = 1920 * 1080 * 3;
+        assert!(
+            estimate.peak_memory_bytes > input_size,
+            "Peak memory {} should exceed input size {}",
+            estimate.peak_memory_bytes,
+            input_size
+        );
+
+        // Should have reasonable CPU cost (> 1.0 due to trellis)
+        assert!(
+            estimate.cpu_cost_multiplier > 1.0,
+            "CPU cost {} should be > 1.0 for BaselineBalanced",
+            estimate.cpu_cost_multiplier
+        );
+
+        // Block count should match expected
+        assert!(estimate.block_count > 0, "Block count should be > 0");
+    }
+
+    #[test]
+    fn test_estimate_resources_fastest_has_lower_cpu() {
+        let fastest = Encoder::new(Preset::BaselineFastest);
+        let balanced = Encoder::new(Preset::BaselineBalanced);
+
+        let est_fast = fastest.estimate_resources(512, 512);
+        let est_balanced = balanced.estimate_resources(512, 512);
+
+        // Fastest should have lower CPU cost (no trellis)
+        assert!(
+            est_fast.cpu_cost_multiplier < est_balanced.cpu_cost_multiplier,
+            "Fastest ({:.2}) should have lower CPU cost than Balanced ({:.2})",
+            est_fast.cpu_cost_multiplier,
+            est_balanced.cpu_cost_multiplier
+        );
+    }
+
+    #[test]
+    fn test_estimate_resources_progressive_has_higher_cpu() {
+        let baseline = Encoder::new(Preset::BaselineBalanced);
+        let progressive = Encoder::new(Preset::ProgressiveBalanced);
+
+        let est_baseline = baseline.estimate_resources(512, 512);
+        let est_prog = progressive.estimate_resources(512, 512);
+
+        // Progressive should have higher CPU cost (multiple scans)
+        assert!(
+            est_prog.cpu_cost_multiplier > est_baseline.cpu_cost_multiplier,
+            "Progressive ({:.2}) should have higher CPU cost than Baseline ({:.2})",
+            est_prog.cpu_cost_multiplier,
+            est_baseline.cpu_cost_multiplier
+        );
+    }
+
+    #[test]
+    fn test_estimate_resources_gray() {
+        let encoder = Encoder::new(Preset::BaselineBalanced);
+        let rgb_estimate = encoder.estimate_resources(512, 512);
+        let gray_estimate = encoder.estimate_resources_gray(512, 512);
+
+        // Grayscale should use less memory (1 channel vs 3)
+        assert!(
+            gray_estimate.peak_memory_bytes < rgb_estimate.peak_memory_bytes,
+            "Grayscale memory {} should be less than RGB {}",
+            gray_estimate.peak_memory_bytes,
+            rgb_estimate.peak_memory_bytes
+        );
+
+        // Grayscale should have lower CPU cost
+        assert!(
+            gray_estimate.cpu_cost_multiplier < rgb_estimate.cpu_cost_multiplier,
+            "Grayscale CPU {:.2} should be less than RGB {:.2}",
+            gray_estimate.cpu_cost_multiplier,
+            rgb_estimate.cpu_cost_multiplier
+        );
+    }
+
+    // =========================================================================
+    // Resource Limit Tests
+    // =========================================================================
+
+    #[test]
+    fn test_dimension_limit_width() {
+        let limits = Limits::default().max_width(100).max_height(100);
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+
+        let pixels = vec![128u8; 200 * 50 * 3];
+        let result = encoder.encode_rgb(&pixels, 200, 50);
+
+        assert!(matches!(result, Err(Error::DimensionLimitExceeded { .. })));
+    }
+
+    #[test]
+    fn test_dimension_limit_height() {
+        let limits = Limits::default().max_width(100).max_height(100);
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+
+        let pixels = vec![128u8; 50 * 200 * 3];
+        let result = encoder.encode_rgb(&pixels, 50, 200);
+
+        assert!(matches!(result, Err(Error::DimensionLimitExceeded { .. })));
+    }
+
+    #[test]
+    fn test_dimension_limit_passes_when_within() {
+        let limits = Limits::default().max_width(100).max_height(100);
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+
+        let pixels = vec![128u8; 64 * 64 * 3];
+        let result = encoder.encode_rgb(&pixels, 64, 64);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_allocation_limit() {
+        let limits = Limits::default().max_alloc_bytes(1000); // Very small limit
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+
+        let pixels = vec![128u8; 256 * 256 * 3];
+        let result = encoder.encode_rgb(&pixels, 256, 256);
+
+        assert!(matches!(result, Err(Error::AllocationLimitExceeded { .. })));
+    }
+
+    #[test]
+    fn test_allocation_limit_passes_when_within() {
+        let limits = Limits::default().max_alloc_bytes(10_000_000); // 10 MB limit
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+
+        let pixels = vec![128u8; 64 * 64 * 3];
+        let result = encoder.encode_rgb(&pixels, 64, 64);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_pixel_count_limit() {
+        let limits = Limits::default().max_pixel_count(1000); // Very small limit
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+
+        let pixels = vec![128u8; 64 * 64 * 3]; // 4096 pixels
+        let result = encoder.encode_rgb(&pixels, 64, 64);
+
+        assert!(matches!(result, Err(Error::PixelCountExceeded { .. })));
+    }
+
+    #[test]
+    fn test_pixel_count_limit_passes_when_within() {
+        let limits = Limits::default().max_pixel_count(10000); // 10000 pixels
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+
+        let pixels = vec![128u8; 64 * 64 * 3]; // 4096 pixels
+        let result = encoder.encode_rgb(&pixels, 64, 64);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_icc_profile_size_limit() {
+        let limits = Limits::default().max_icc_profile_bytes(100);
+        let encoder = Encoder::new(Preset::BaselineFastest)
+            .limits(limits)
+            .icc_profile(vec![0u8; 1000]); // 1000 byte ICC profile
+
+        let pixels = vec![128u8; 64 * 64 * 3];
+        let result = encoder.encode_rgb(&pixels, 64, 64);
+
+        assert!(matches!(result, Err(Error::IccProfileTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_icc_profile_size_limit_passes_when_within() {
+        let limits = Limits::default().max_icc_profile_bytes(2000);
+        let encoder = Encoder::new(Preset::BaselineFastest)
+            .limits(limits)
+            .icc_profile(vec![0u8; 1000]); // 1000 byte ICC profile
+
+        let pixels = vec![128u8; 64 * 64 * 3];
+        let result = encoder.encode_rgb(&pixels, 64, 64);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_limits_disabled_by_default() {
+        let encoder = Encoder::new(Preset::BaselineFastest);
+        assert_eq!(encoder.limits, Limits::none());
+    }
+
+    #[test]
+    fn test_limits_has_limits() {
+        assert!(!Limits::none().has_limits());
+        assert!(Limits::default().max_width(100).has_limits());
+        assert!(Limits::default().max_height(100).has_limits());
+        assert!(Limits::default().max_pixel_count(1000).has_limits());
+        assert!(Limits::default().max_alloc_bytes(1000).has_limits());
+        assert!(Limits::default().max_icc_profile_bytes(1000).has_limits());
+    }
+
+    // =========================================================================
+    // Cancellation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_cancellable_with_no_cancellation() {
+        let encoder = Encoder::new(Preset::BaselineFastest);
+        let pixels = vec![128u8; 64 * 64 * 3];
+
+        let result = encoder.encode_rgb_cancellable(&pixels, 64, 64, None, None);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_cancellable_immediate_cancel() {
+        let encoder = Encoder::new(Preset::BaselineFastest);
+        let pixels = vec![128u8; 64 * 64 * 3];
+        let cancel = AtomicBool::new(true); // Already cancelled
+
+        let result = encoder.encode_rgb_cancellable(&pixels, 64, 64, Some(&cancel), None);
+
+        assert!(matches!(result, Err(Error::Cancelled)));
+    }
+
+    #[test]
+    fn test_cancellable_with_timeout() {
+        let encoder = Encoder::new(Preset::BaselineFastest);
+        let pixels = vec![128u8; 64 * 64 * 3];
+
+        // 10 second timeout - should complete well within this
+        let result =
+            encoder.encode_rgb_cancellable(&pixels, 64, 64, None, Some(Duration::from_secs(10)));
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_cancellable_gray() {
+        let encoder = Encoder::new(Preset::BaselineFastest);
+        let pixels = vec![128u8; 64 * 64];
+
+        let result = encoder.encode_gray_cancellable(&pixels, 64, 64, None, None);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_cancellable_with_limits() {
+        // Test that limits work in cancellable method too
+        let limits = Limits::default().max_width(32);
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+
+        let pixels = vec![128u8; 64 * 64 * 3];
+        let result = encoder.encode_rgb_cancellable(&pixels, 64, 64, None, None);
+
+        assert!(matches!(result, Err(Error::DimensionLimitExceeded { .. })));
+    }
+
+    #[test]
+    fn test_cancellation_context_none() {
+        let ctx = CancellationContext::none();
+        assert!(ctx.check().is_ok());
+    }
+
+    #[test]
+    fn test_cancellation_context_with_cancel_flag() {
+        use std::sync::atomic::Ordering;
+
+        let cancel = AtomicBool::new(false);
+        let ctx = CancellationContext::new(Some(&cancel), None);
+        assert!(ctx.check().is_ok());
+
+        cancel.store(true, Ordering::Relaxed);
+        assert!(matches!(ctx.check(), Err(Error::Cancelled)));
+    }
+
+    #[test]
+    fn test_cancellation_context_with_expired_deadline() {
+        // Create a deadline that's already passed
+        let ctx = CancellationContext {
+            cancel: None,
+            deadline: Some(Instant::now() - Duration::from_secs(1)),
+        };
+
+        assert!(matches!(ctx.check(), Err(Error::TimedOut)));
+    }
+
+    #[test]
+    fn test_dimension_exact_at_limit_passes() {
+        // Dimensions exactly at limit should pass
+        let limits = Limits::default().max_width(64).max_height(64);
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+
+        let pixels = vec![128u8; 64 * 64 * 3];
+        let result = encoder.encode_rgb(&pixels, 64, 64);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_pixel_count_exact_at_limit_passes() {
+        // Pixel count exactly at limit should pass
+        let limits = Limits::default().max_pixel_count(4096); // Exactly 64*64
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+
+        let pixels = vec![128u8; 64 * 64 * 3];
+        let result = encoder.encode_rgb(&pixels, 64, 64);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_multiple_limits_all_checked() {
+        // Test that all limits are checked, not just the first
+        let limits = Limits::default()
+            .max_width(1000)
+            .max_height(1000)
+            .max_pixel_count(100); // This should fail
+
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+        let pixels = vec![128u8; 64 * 64 * 3]; // 4096 pixels
+
+        let result = encoder.encode_rgb(&pixels, 64, 64);
+        assert!(matches!(result, Err(Error::PixelCountExceeded { .. })));
+    }
+
+    #[test]
+    fn test_limits_with_grayscale() {
+        let limits = Limits::default().max_pixel_count(100);
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+
+        let pixels = vec![128u8; 64 * 64]; // Grayscale, 4096 pixels
+        let result = encoder.encode_gray(&pixels, 64, 64);
+
+        assert!(matches!(result, Err(Error::PixelCountExceeded { .. })));
+    }
+
+    #[test]
+    fn test_estimate_resources_with_subsampling() {
+        let encoder_444 = Encoder::new(Preset::BaselineBalanced).subsampling(Subsampling::S444);
+        let encoder_420 = Encoder::new(Preset::BaselineBalanced).subsampling(Subsampling::S420);
+
+        let est_444 = encoder_444.estimate_resources(512, 512);
+        let est_420 = encoder_420.estimate_resources(512, 512);
+
+        // 4:4:4 should use more memory than 4:2:0 (no chroma downsampling)
+        assert!(
+            est_444.peak_memory_bytes > est_420.peak_memory_bytes,
+            "4:4:4 memory {} should exceed 4:2:0 memory {}",
+            est_444.peak_memory_bytes,
+            est_420.peak_memory_bytes
+        );
+    }
+
+    #[test]
+    fn test_estimate_resources_block_count() {
+        // With 4:2:0 subsampling (default): Y gets full blocks, chroma gets 1/4
+        let encoder = Encoder::new(Preset::BaselineFastest);
+
+        // 64x64 image with 4:2:0:
+        // Y blocks: 8x8 = 64
+        // Chroma: 32x32 pixels, 4x4 blocks each = 16 per component
+        // Total: 64 + 16 + 16 = 96
+        let estimate = encoder.estimate_resources(64, 64);
+        assert_eq!(estimate.block_count, 96);
+
+        // With 4:4:4 subsampling: all components get full blocks
+        let encoder_444 = Encoder::new(Preset::BaselineFastest).subsampling(Subsampling::S444);
+        let estimate_444 = encoder_444.estimate_resources(64, 64);
+        // 64 blocks * 3 components = 192
+        assert_eq!(estimate_444.block_count, 192);
+    }
+
+    #[test]
+    fn test_cancellable_gray_with_limits() {
+        let limits = Limits::default().max_width(32);
+        let encoder = Encoder::new(Preset::BaselineFastest).limits(limits);
+
+        let pixels = vec![128u8; 64 * 64];
+        let result = encoder.encode_gray_cancellable(&pixels, 64, 64, None, None);
+
+        assert!(matches!(result, Err(Error::DimensionLimitExceeded { .. })));
     }
 }

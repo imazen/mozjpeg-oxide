@@ -141,6 +141,12 @@ pub mod bitstream;
 #[allow(dead_code)]
 pub mod color;
 
+/// AVX2-optimized color conversion (internal).
+#[doc(hidden)]
+#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
+pub mod color_avx2;
+
 /// Constants and quantization tables (internal).
 #[doc(hidden)]
 #[allow(dead_code)]

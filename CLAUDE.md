@@ -444,6 +444,13 @@ let encoder = Encoder::fastest().overshoot_deringing(false); // fastest disables
    - DC scans can be interleaved (multiple components)
    - AC scans must be single-component
    - Successive approximation uses Ah/Al for bit refinement
+5. **AVX2/SIMD intrinsic element ordering** (CRITICAL):
+   - `_mm256_set_epi16(e15, e14, ..., e1, e0)` takes arguments in **REVERSE order** (highest element first)
+   - NASM `times 4 dw A, B` creates `[A,B,A,B,...]` with A at even indices
+   - To match NASM layout, use `_mm256_set_epi16(..., B, A, B, A)` (swap pairs)
+   - For `vpmaddwd`: `result[i] = a[2i] * b[2i] + a[2i+1] * b[2i+1]`
+   - If data is `[R, G]` and you want `R*coef_R + G*coef_G`, coefficients must be `[coef_R, coef_G]` in memory
+   - See `dct.rs:1384` for documented example
 
 ### Testing Patterns
 1. Use `#[cfg(test)]` modules within each source file

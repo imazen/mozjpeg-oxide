@@ -84,6 +84,10 @@ harness = false
 name = "dct"
 harness = false
 
+[[bench]]
+name = "color"
+harness = false
+
 # Examples that require instrumented C mozjpeg (sys-local crate)
 [[example]]
 name = "trace_pipeline"

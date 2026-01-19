@@ -32,7 +32,7 @@ unsafe fn trace_deinterleave() {
     // Use simple pattern: pixel i has R=i*3, G=i*3+1, B=i*3+2
     let mut rgb = vec![0u8; 96];
     for i in 0..32 {
-        rgb[i * 3] = (i * 3) as u8;         // R
+        rgb[i * 3] = (i * 3) as u8; // R
         rgb[i * 3 + 1] = (i * 3 + 1) as u8; // G
         rgb[i * 3 + 2] = (i * 3 + 2) as u8; // B
     }
@@ -162,7 +162,9 @@ unsafe fn trace_deinterleave() {
     println!("Expected G for even pixels: [1, 7, 13, 19, 25, 31, 37, 43, 49, 55, 61, 67, 73, 79, 85, 91]");
     println!("Got G even: {:?}", g_even);
     println!();
-    println!("Expected R for odd pixels: [3, 9, 15, 21, 27, 33, 39, 45, 51, 57, 63, 69, 75, 81, 87, 93]");
+    println!(
+        "Expected R for odd pixels: [3, 9, 15, 21, 27, 33, 39, 45, 51, 57, 63, 69, 75, 81, 87, 93]"
+    );
     println!("Got R odd: {:?}", r_odd);
     println!();
 
@@ -180,7 +182,10 @@ unsafe fn trace_deinterleave() {
 
     // pw_mf016_mf033 = pack_i16_pair(-F_0_168, -F_0_331)
     let pw_mf016_mf033 = _mm256_set1_epi32(pack_i16_pair(-F_0_168, -F_0_331));
-    print_m256i_i16("pw_mf016_mf033 (should be [-11059, -21709] repeated)", pw_mf016_mf033);
+    print_m256i_i16(
+        "pw_mf016_mf033 (should be [-11059, -21709] repeated)",
+        pw_mf016_mf033,
+    );
 
     // Interleave R_odd with G_odd for low half
     let rg_interleaved = _mm256_unpacklo_epi16(ymm_b_new, ymm_d);
@@ -194,7 +199,10 @@ unsafe fn trace_deinterleave() {
 
     // Expected for first odd pixel (pixel 1): R=3, G=4
     // R * (-11059) + G * (-21709) = 3 * (-11059) + 4 * (-21709) = -33177 + (-86836) = -120013
-    println!("Expected for pixel 1 (R=3, G=4): 3*(-11059) + 4*(-21709) = {}", 3 * (-11059) + 4 * (-21709));
+    println!(
+        "Expected for pixel 1 (R=3, G=4): 3*(-11059) + 4*(-21709) = {}",
+        3 * (-11059) + 4 * (-21709)
+    );
 
     // Manual verification
     let r0 = r_odd[0] as i32;
@@ -208,7 +216,8 @@ unsafe fn trace_deinterleave() {
     const FIX_0_50000: i32 = 32768;
     const ONE_HALF: i32 = 1 << 15;
 
-    let cb_scalar = ((-FIX_0_16874 * r0 - FIX_0_33126 * g0 + FIX_0_50000 * b0 + ONE_HALF) >> SCALEBITS) + 128;
+    let cb_scalar =
+        ((-FIX_0_16874 * r0 - FIX_0_33126 * g0 + FIX_0_50000 * b0 + ONE_HALF) >> SCALEBITS) + 128;
     println!("Scalar Cb for pixel 1: {}", cb_scalar);
 
     // Now let's check the AVX2 path more carefully
@@ -238,7 +247,10 @@ unsafe fn trace_deinterleave() {
     // These should be equivalent, but let's verify
     println!("Scalar formula: ((-11059*R - 21709*G + 32768*B + 32768) >> 16) + 128");
     println!("AVX2 formula: ((-11059*R - 21709*G + B<<15) + pd_onehalfm1_cj) >> 16");
-    println!("pd_onehalfm1_cj = (1<<15) - 1 + (128<<16) = 32767 + 8388608 = {}", pd_onehalfm1_cj);
+    println!(
+        "pd_onehalfm1_cj = (1<<15) - 1 + (128<<16) = 32767 + 8388608 = {}",
+        pd_onehalfm1_cj
+    );
 
     // Scalar: (-33177 - 86836 + 163840 + 32768) >> 16 + 128
     //       = 76595 >> 16 + 128 = 1 + 128 = 129

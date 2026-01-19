@@ -1361,9 +1361,7 @@ pub mod avx2 {
         let ymm6 = _mm256_permute2x128_si256(ymm0, ymm0, 0x01); // tmp11_10
 
         // PW_1_NEG1: high lane = 1, low lane = -1
-        let pw_1_neg1 = _mm256_set_epi16(
-            -1, -1, -1, -1, -1, -1, -1, -1, 1, 1, 1, 1, 1, 1, 1, 1,
-        );
+        let pw_1_neg1 = _mm256_set_epi16(-1, -1, -1, -1, -1, -1, -1, -1, 1, 1, 1, 1, 1, 1, 1, 1);
         let ymm0 = _mm256_sign_epi16(ymm0, pw_1_neg1); // tmp10_neg11
         let ymm6 = _mm256_add_epi16(ymm6, ymm0); // (tmp10+tmp11)_(tmp10-tmp11)
 
@@ -1383,10 +1381,22 @@ pub mod avx2 {
         // NASM: times 4 dw A, B creates [A,B,A,B,...] - A at even indices
         // _mm256_set_epi16 is in reverse order, so we need [B,A,B,A,...] to get [A,B,A,B,...] in memory
         let pw_f130_f054 = _mm256_set_epi16(
-            F_0_541, F_0_541_MINUS_1_847, F_0_541, F_0_541_MINUS_1_847,
-            F_0_541, F_0_541_MINUS_1_847, F_0_541, F_0_541_MINUS_1_847,
-            F_0_541, F_0_541_PLUS_0_765, F_0_541, F_0_541_PLUS_0_765,
-            F_0_541, F_0_541_PLUS_0_765, F_0_541, F_0_541_PLUS_0_765,
+            F_0_541,
+            F_0_541_MINUS_1_847,
+            F_0_541,
+            F_0_541_MINUS_1_847,
+            F_0_541,
+            F_0_541_MINUS_1_847,
+            F_0_541,
+            F_0_541_MINUS_1_847,
+            F_0_541,
+            F_0_541_PLUS_0_765,
+            F_0_541,
+            F_0_541_PLUS_0_765,
+            F_0_541,
+            F_0_541_PLUS_0_765,
+            F_0_541,
+            F_0_541_PLUS_0_765,
         );
 
         let ymm1 = _mm256_madd_epi16(ymm1, pw_f130_f054);
@@ -1423,10 +1433,22 @@ pub mod avx2 {
 
         // PW_MF078_F117_F078_F117 - pairs are [A,B] in memory
         let pw_mf078_f117 = _mm256_set_epi16(
-            F_1_175, F_1_175_MINUS_0_390, F_1_175, F_1_175_MINUS_0_390,
-            F_1_175, F_1_175_MINUS_0_390, F_1_175, F_1_175_MINUS_0_390,
-            F_1_175, F_1_175_MINUS_1_961, F_1_175, F_1_175_MINUS_1_961,
-            F_1_175, F_1_175_MINUS_1_961, F_1_175, F_1_175_MINUS_1_961,
+            F_1_175,
+            F_1_175_MINUS_0_390,
+            F_1_175,
+            F_1_175_MINUS_0_390,
+            F_1_175,
+            F_1_175_MINUS_0_390,
+            F_1_175,
+            F_1_175_MINUS_0_390,
+            F_1_175,
+            F_1_175_MINUS_1_961,
+            F_1_175,
+            F_1_175_MINUS_1_961,
+            F_1_175,
+            F_1_175_MINUS_1_961,
+            F_1_175,
+            F_1_175_MINUS_1_961,
         );
 
         let ymm5 = _mm256_madd_epi16(ymm5, pw_mf078_f117);
@@ -1439,10 +1461,22 @@ pub mod avx2 {
 
         // PW_MF060_MF089_MF050_MF256 - pairs are [A,B] in memory
         let pw_mf060_mf089 = _mm256_set_epi16(
-            F_NEG_2_562, F_2_053_MINUS_2_562, F_NEG_2_562, F_2_053_MINUS_2_562,
-            F_NEG_2_562, F_2_053_MINUS_2_562, F_NEG_2_562, F_2_053_MINUS_2_562,
-            F_NEG_0_899, F_0_298_MINUS_0_899, F_NEG_0_899, F_0_298_MINUS_0_899,
-            F_NEG_0_899, F_0_298_MINUS_0_899, F_NEG_0_899, F_0_298_MINUS_0_899,
+            F_NEG_2_562,
+            F_2_053_MINUS_2_562,
+            F_NEG_2_562,
+            F_2_053_MINUS_2_562,
+            F_NEG_2_562,
+            F_2_053_MINUS_2_562,
+            F_NEG_2_562,
+            F_2_053_MINUS_2_562,
+            F_NEG_0_899,
+            F_0_298_MINUS_0_899,
+            F_NEG_0_899,
+            F_0_298_MINUS_0_899,
+            F_NEG_0_899,
+            F_0_298_MINUS_0_899,
+            F_NEG_0_899,
+            F_0_298_MINUS_0_899,
         );
 
         let ymm1 = _mm256_madd_epi16(ymm1, pw_mf060_mf089);
@@ -1474,10 +1508,22 @@ pub mod avx2 {
 
         // PW_F050_MF256_F060_MF089
         let pw_f050_mf256 = _mm256_set_epi16(
-            F_NEG_0_899, F_1_501_MINUS_0_899, F_NEG_0_899, F_1_501_MINUS_0_899,
-            F_NEG_0_899, F_1_501_MINUS_0_899, F_NEG_0_899, F_1_501_MINUS_0_899,
-            F_NEG_2_562, F_3_072_MINUS_2_562, F_NEG_2_562, F_3_072_MINUS_2_562,
-            F_NEG_2_562, F_3_072_MINUS_2_562, F_NEG_2_562, F_3_072_MINUS_2_562,
+            F_NEG_0_899,
+            F_1_501_MINUS_0_899,
+            F_NEG_0_899,
+            F_1_501_MINUS_0_899,
+            F_NEG_0_899,
+            F_1_501_MINUS_0_899,
+            F_NEG_0_899,
+            F_1_501_MINUS_0_899,
+            F_NEG_2_562,
+            F_3_072_MINUS_2_562,
+            F_NEG_2_562,
+            F_3_072_MINUS_2_562,
+            F_NEG_2_562,
+            F_3_072_MINUS_2_562,
+            F_NEG_2_562,
+            F_3_072_MINUS_2_562,
         );
 
         let ymm7 = _mm256_madd_epi16(ymm7, pw_f050_mf256);

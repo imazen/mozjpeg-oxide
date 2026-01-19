@@ -45,8 +45,22 @@ unsafe fn print_ymm_i16(name: &str, v: __m256i) {
     println!(
         "{}: [{:5} {:5} {:5} {:5} {:5} {:5} {:5} {:5} | {:5} {:5} {:5} {:5} {:5} {:5} {:5} {:5}]",
         name,
-        arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7],
-        arr[8], arr[9], arr[10], arr[11], arr[12], arr[13], arr[14], arr[15]
+        arr[0],
+        arr[1],
+        arr[2],
+        arr[3],
+        arr[4],
+        arr[5],
+        arr[6],
+        arr[7],
+        arr[8],
+        arr[9],
+        arr[10],
+        arr[11],
+        arr[12],
+        arr[13],
+        arr[14],
+        arr[15]
     );
 }
 
@@ -123,10 +137,22 @@ unsafe fn debug_data26_computation(samples: &[i16; DCTSIZE2]) {
 
     // Constant vector
     let pw_f130_f054 = _mm256_set_epi16(
-        F_0_541, F_0_541_MINUS_1_847, F_0_541, F_0_541_MINUS_1_847,
-        F_0_541, F_0_541_MINUS_1_847, F_0_541, F_0_541_MINUS_1_847,
-        F_0_541, F_0_541_PLUS_0_765, F_0_541, F_0_541_PLUS_0_765,
-        F_0_541, F_0_541_PLUS_0_765, F_0_541, F_0_541_PLUS_0_765,
+        F_0_541,
+        F_0_541_MINUS_1_847,
+        F_0_541,
+        F_0_541_MINUS_1_847,
+        F_0_541,
+        F_0_541_MINUS_1_847,
+        F_0_541,
+        F_0_541_MINUS_1_847,
+        F_0_541,
+        F_0_541_PLUS_0_765,
+        F_0_541,
+        F_0_541_PLUS_0_765,
+        F_0_541,
+        F_0_541_PLUS_0_765,
+        F_0_541,
+        F_0_541_PLUS_0_765,
     );
     print_ymm_i16("pw_f130_f054", pw_f130_f054);
 
@@ -169,7 +195,14 @@ unsafe fn debug_data26_computation(samples: &[i16; DCTSIZE2]) {
     let b0 = pw_f130_f054.as_i16x16().as_array()[0] as i32;
     let b1 = pw_f130_f054.as_i16x16().as_array()[1] as i32;
     println!("  a0={}, a1={}, b0={}, b1={}", a0, a1, b0, b1);
-    println!("  a0*b0 + a1*b1 = {} * {} + {} * {} = {}", a0, b0, a1, b1, a0 * b0 + a1 * b1);
+    println!(
+        "  a0*b0 + a1*b1 = {} * {} + {} * {} = {}",
+        a0,
+        b0,
+        a1,
+        b1,
+        a0 * b0 + a1 * b1
+    );
 }
 
 #[target_feature(enable = "avx2")]

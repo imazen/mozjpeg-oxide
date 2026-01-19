@@ -1,7 +1,9 @@
 //! DCT benchmarks comparing different implementations.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use mozjpeg_rs::dct::{forward_dct, forward_dct_8x8, forward_dct_8x8_simd, forward_dct_8x8_transpose};
+use mozjpeg_rs::dct::{
+    forward_dct, forward_dct_8x8, forward_dct_8x8_simd, forward_dct_8x8_transpose,
+};
 
 /// Generate pseudo-random test data
 fn generate_test_data() -> [u8; 64] {

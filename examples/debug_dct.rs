@@ -115,9 +115,9 @@ fn scalar_dct(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
         // tmp11 = tmp1 + tmp2 (textbooks call this tmp12)
         // tmp12 = tmp1 - tmp2 (textbooks call this tmp13)
         let tmp10 = tmp0 + tmp3;
-        let tmp13 = tmp0 - tmp3;  // libjpeg naming
-        let tmp11 = tmp1 + tmp2;  // libjpeg naming
-        let tmp12 = tmp1 - tmp2;  // libjpeg naming
+        let tmp13 = tmp0 - tmp3; // libjpeg naming
+        let tmp11 = tmp1 + tmp2; // libjpeg naming
+        let tmp12 = tmp1 - tmp2; // libjpeg naming
 
         workspace[base] = (tmp10 + tmp11) << PASS1_BITS;
         workspace[base + 4] = (tmp10 - tmp11) << PASS1_BITS;

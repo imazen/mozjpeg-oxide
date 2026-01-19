@@ -103,7 +103,7 @@ Rust port of Mozilla's mozjpeg JPEG encoder, following the jpegli-rs methodology
 - **Trellis mode: Rust is 10% faster than C mozjpeg** (at 2048x2048)
 - Baseline gap is ~4.7x - entropy encoding is the remaining bottleneck
 - AVX2 DCT intrinsics provide 26% speedup for baseline encoding
-- Color conversion uses i32x8 (AVX2) for 8 pixels at a time
+- Color conversion uses yuv crate (5.15 Gelem/s, AVX-512/AVX2/SSE/NEON/WASM)
 
 **\* Progressive mode note:** Both Rust and C support `optimize_scans` which tries multiple
 scan configurations to find the smallest output. Progressive encoding now works correctly
@@ -571,6 +571,11 @@ GitHub Actions workflow runs on push/PR:
 ## Feature Flags
 
 ### Published Features (safe to use)
+
+- **`fast-yuv`** (default) - Use the `yuv` crate for SIMD color conversion.
+  ~38% faster than our hand-written AVX2 (5.15 vs 3.72 Gelem/s at 1920x1080).
+  Supports AVX-512, AVX2, SSE, NEON, and WASM SIMD. Precision difference is ±1 level,
+  invisible after JPEG quantization.
 
 - **`mozjpeg-sys-config`** - Encode using C mozjpeg with Rust `Encoder` settings.
   Adds `Encoder::to_c_mozjpeg()` which returns a `CMozjpeg` encoder.

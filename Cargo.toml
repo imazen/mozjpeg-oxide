@@ -80,6 +80,10 @@ serde_json = "1.0.148"
 name = "encode"
 harness = false
 
+[[bench]]
+name = "dct"
+harness = false
+
 # Examples that require instrumented C mozjpeg (sys-local crate)
 [[example]]
 name = "trace_pipeline"

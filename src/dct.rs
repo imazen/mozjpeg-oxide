@@ -1215,6 +1215,360 @@ pub mod avx2 {
         data[6] = out6;
         data[7] = out7;
     }
+
+    // ============================================================================
+    // Mozjpeg-style 16-bit DCT using vpmaddwd
+    // ============================================================================
+    //
+    // This implementation follows mozjpeg's jfdctint-avx2.asm approach:
+    // - Data is packed as 16-bit (i16) values, two rows per YMM register
+    // - Uses vpunpcklwd/hi for 16-bit transpose
+    // - Uses vpmaddwd for combined multiply-add operations (key optimization!)
+    //
+    // vpmaddwd computes: result[i] = a[2i] * b[2i] + a[2i+1] * b[2i+1]
+    // This allows computing expressions like (z1 + tmp13 * FIX_X) in one instruction.
+
+    // Pre-computed constant vectors for vpmaddwd operations
+    // Format: pairs of (multiplier_for_first, multiplier_for_second) repeated
+
+    // For data2/data6: (FIX_0_541 + FIX_0_765, FIX_0_541) and (FIX_0_541 - FIX_1_847, FIX_0_541)
+    const F_0_541_PLUS_0_765: i16 = (FIX_0_541196100 + FIX_0_765366865) as i16; // 10703
+    const F_0_541_MINUS_1_847: i16 = (FIX_0_541196100 - FIX_1_847759065) as i16; // -10704
+    const F_0_541: i16 = FIX_0_541196100 as i16;
+
+    // For z3/z4: (FIX_1_175 - FIX_1_961, FIX_1_175) and (FIX_1_175 - FIX_0_390, FIX_1_175)
+    const F_1_175_MINUS_1_961: i16 = (FIX_1_175875602 - FIX_1_961570560) as i16; // -6436
+    const F_1_175_MINUS_0_390: i16 = (FIX_1_175875602 - FIX_0_390180644) as i16; // 6437
+    const F_1_175: i16 = FIX_1_175875602 as i16;
+
+    // For tmp4/tmp5: packed multipliers for odd part
+    const F_0_298_MINUS_0_899: i16 = (FIX_0_298631336 - FIX_0_899976223) as i16; // -4927
+    const F_NEG_0_899: i16 = (-FIX_0_899976223) as i16;
+    const F_2_053_MINUS_2_562: i16 = (FIX_2_053119869 - FIX_2_562915447) as i16; // -4176
+    const F_NEG_2_562: i16 = (-FIX_2_562915447) as i16;
+
+    // For tmp6/tmp7: packed multipliers for odd part
+    const F_3_072_MINUS_2_562: i16 = (FIX_3_072711026 - FIX_2_562915447) as i16; // 4177
+    const F_1_501_MINUS_0_899: i16 = (FIX_1_501321110 - FIX_0_899976223) as i16; // 4926
+
+    /// Mozjpeg-style AVX2 DCT using 16-bit packed data and vpmaddwd.
+    ///
+    /// This implementation mirrors mozjpeg's jfdctint-avx2.asm for maximum performance.
+    /// Key differences from the 32-bit version:
+    /// - Works with i16 packed data (2 rows per YMM register)
+    /// - Uses vpmaddwd for multiply-accumulate (2 muls + 1 add in one instruction)
+    /// - Uses 16-bit unpack instructions for transpose (faster than 32-bit)
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn forward_dct_8x8_avx2_i16(
+        samples: &[i16; DCTSIZE2],
+        coeffs: &mut [i16; DCTSIZE2],
+    ) {
+        // Load data as packed 16-bit pairs: (row0|row4), (row1|row5), (row2|row6), (row3|row7)
+        // Each ymm holds 16 i16 values: 8 from one row, 8 from another
+        let ymm4 = _mm256_loadu_si256(samples.as_ptr().add(0) as *const __m256i); // rows 0-1
+        let ymm5 = _mm256_loadu_si256(samples.as_ptr().add(16) as *const __m256i); // rows 2-3
+        let ymm6 = _mm256_loadu_si256(samples.as_ptr().add(32) as *const __m256i); // rows 4-5
+        let ymm7 = _mm256_loadu_si256(samples.as_ptr().add(48) as *const __m256i); // rows 6-7
+
+        // Reorganize to (row0|row4), (row1|row5), (row2|row6), (row3|row7)
+        let mut ymm0 = _mm256_permute2x128_si256(ymm4, ymm6, 0x20); // row0|row4
+        let mut ymm1 = _mm256_permute2x128_si256(ymm4, ymm6, 0x31); // row1|row5
+        let mut ymm2 = _mm256_permute2x128_si256(ymm5, ymm7, 0x20); // row2|row6
+        let mut ymm3 = _mm256_permute2x128_si256(ymm5, ymm7, 0x31); // row3|row7
+
+        // Transpose 8x8x16-bit matrix (phase 1: interleave 16-bit elements)
+        transpose_8x8_i16(&mut ymm0, &mut ymm1, &mut ymm2, &mut ymm3);
+
+        // Pass 1: 1D DCT on rows
+        dct_1d_i16(&mut ymm0, &mut ymm1, &mut ymm2, &mut ymm3, true);
+
+        // Reorganize for column pass
+        let mut ymm4 = _mm256_permute2x128_si256(ymm1, ymm3, 0x20); // data3|data7
+        let ymm1_new = _mm256_permute2x128_si256(ymm1, ymm3, 0x31); // data1|data5
+        ymm1 = ymm1_new;
+
+        // Transpose for column pass
+        transpose_8x8_i16(&mut ymm0, &mut ymm1, &mut ymm2, &mut ymm4);
+
+        // Pass 2: 1D DCT on columns
+        let mut ymm3 = ymm4;
+        dct_1d_i16(&mut ymm0, &mut ymm1, &mut ymm2, &mut ymm3, false);
+
+        // Reorganize output
+        let out01 = _mm256_permute2x128_si256(ymm0, ymm1, 0x30); // data0|data1
+        let out23 = _mm256_permute2x128_si256(ymm2, ymm1, 0x20); // data2|data3
+        let out45 = _mm256_permute2x128_si256(ymm0, ymm3, 0x31); // data4|data5
+        let out67 = _mm256_permute2x128_si256(ymm2, ymm3, 0x21); // data6|data7
+
+        // Store results
+        _mm256_storeu_si256(coeffs.as_mut_ptr().add(0) as *mut __m256i, out01);
+        _mm256_storeu_si256(coeffs.as_mut_ptr().add(16) as *mut __m256i, out23);
+        _mm256_storeu_si256(coeffs.as_mut_ptr().add(32) as *mut __m256i, out45);
+        _mm256_storeu_si256(coeffs.as_mut_ptr().add(48) as *mut __m256i, out67);
+    }
+
+    /// 8x8x16-bit matrix transpose using AVX2.
+    /// Input: ymm0-3 each contain two rows (row_i | row_i+4)
+    /// Output: transposed matrix in same format
+    #[inline(always)]
+    unsafe fn transpose_8x8_i16(
+        ymm0: &mut __m256i,
+        ymm1: &mut __m256i,
+        ymm2: &mut __m256i,
+        ymm3: &mut __m256i,
+    ) {
+        // Phase 1: Interleave 16-bit elements
+        let t0 = _mm256_unpacklo_epi16(*ymm0, *ymm1);
+        let t1 = _mm256_unpackhi_epi16(*ymm0, *ymm1);
+        let t2 = _mm256_unpacklo_epi16(*ymm2, *ymm3);
+        let t3 = _mm256_unpackhi_epi16(*ymm2, *ymm3);
+
+        // Phase 2: Interleave 32-bit elements
+        let u0 = _mm256_unpacklo_epi32(t0, t2);
+        let u1 = _mm256_unpackhi_epi32(t0, t2);
+        let u2 = _mm256_unpacklo_epi32(t1, t3);
+        let u3 = _mm256_unpackhi_epi32(t1, t3);
+
+        // Phase 3: Permute 64-bit lanes
+        *ymm0 = _mm256_permute4x64_epi64(u0, 0x8D); // 10 00 11 01
+        *ymm1 = _mm256_permute4x64_epi64(u1, 0x8D);
+        *ymm2 = _mm256_permute4x64_epi64(u2, 0xD8); // 11 01 10 00
+        *ymm3 = _mm256_permute4x64_epi64(u3, 0xD8);
+    }
+
+    /// 1D DCT on 16-bit packed data using vpmaddwd.
+    /// ymm0-3 contain data pairs; pass1=true for row pass, false for column pass.
+    #[inline(always)]
+    unsafe fn dct_1d_i16(
+        ymm0: &mut __m256i,
+        ymm1: &mut __m256i,
+        ymm2: &mut __m256i,
+        ymm3: &mut __m256i,
+        pass1: bool,
+    ) {
+        // data layout: ymm0=(data1_0|data6_7), ymm1=(data3_2|data4_5), etc.
+        // We need tmp values: tmp0 = data0+data7, tmp7 = data0-data7, etc.
+
+        let t5 = _mm256_sub_epi16(*ymm0, *ymm3); // tmp6_7
+        let t6 = _mm256_add_epi16(*ymm0, *ymm3); // tmp1_0
+        let t7 = _mm256_add_epi16(*ymm1, *ymm2); // tmp3_2
+        let t8 = _mm256_sub_epi16(*ymm1, *ymm2); // tmp4_5
+
+        // ---- Even part ----
+
+        // Swap halves of t6 to get tmp0_1
+        let t6_swap = _mm256_permute2x128_si256(t6, t6, 0x01);
+        let tmp10_11 = _mm256_add_epi16(t6_swap, t7); // tmp10_11
+        let tmp13_12 = _mm256_sub_epi16(t6_swap, t7); // tmp13_12
+
+        // Swap halves of tmp10_11 to get tmp11_10
+        let tmp11_10 = _mm256_permute2x128_si256(tmp10_11, tmp10_11, 0x01);
+
+        // Apply sign flip for (tmp10+tmp11, tmp10-tmp11)
+        let sign_mask = _mm256_set_epi16(
+            -1, -1, -1, -1, -1, -1, -1, -1, 1, 1, 1, 1, 1, 1, 1, 1,
+        );
+        let tmp10_neg11 = _mm256_sign_epi16(tmp10_11, sign_mask);
+        let sum_diff = _mm256_add_epi16(tmp11_10, tmp10_neg11); // (tmp10+tmp11, tmp10-tmp11)
+
+        // data0_4
+        let out0_4 = if pass1 {
+            _mm256_slli_epi16(sum_diff, PASS1_BITS as i32)
+        } else {
+            // Descale by PASS1_BITS with rounding
+            let round = _mm256_set1_epi16(1 << (PASS1_BITS - 1));
+            _mm256_srai_epi16(_mm256_add_epi16(sum_diff, round), PASS1_BITS as i32)
+        };
+
+        // data2_6: uses vpmaddwd with tmp12, tmp13 interleaved
+        // data2 = tmp13 * (FIX_0_541 + FIX_0_765) + tmp12 * FIX_0_541
+        // data6 = tmp13 * FIX_0_541 + tmp12 * (FIX_0_541 - FIX_1_847)
+
+        let tmp12_13 = _mm256_permute2x128_si256(tmp13_12, tmp13_12, 0x01);
+
+        // Interleave tmp13 and tmp12 for vpmaddwd
+        let interleaved_lo = _mm256_unpacklo_epi16(tmp13_12, tmp12_13);
+        let interleaved_hi = _mm256_unpackhi_epi16(tmp13_12, tmp12_13);
+
+        // Constant vectors for data2_6 calculation
+        let const_data2_6 = _mm256_set_epi16(
+            F_0_541_MINUS_1_847,
+            F_0_541,
+            F_0_541_MINUS_1_847,
+            F_0_541,
+            F_0_541_MINUS_1_847,
+            F_0_541,
+            F_0_541_MINUS_1_847,
+            F_0_541,
+            F_0_541_PLUS_0_765,
+            F_0_541,
+            F_0_541_PLUS_0_765,
+            F_0_541,
+            F_0_541_PLUS_0_765,
+            F_0_541,
+            F_0_541_PLUS_0_765,
+            F_0_541,
+        );
+
+        let data2_6_lo = _mm256_madd_epi16(interleaved_lo, const_data2_6);
+        let data2_6_hi = _mm256_madd_epi16(interleaved_hi, const_data2_6);
+
+        // Descale and pack back to i16
+        // Use compile-time constants for shift amounts
+        let (data2_6_lo, data2_6_hi, round32) = if pass1 {
+            const N: i32 = CONST_BITS - PASS1_BITS; // 11
+            let round = _mm256_set1_epi32(1 << (N - 1));
+            (
+                _mm256_srai_epi32::<N>(_mm256_add_epi32(data2_6_lo, round)),
+                _mm256_srai_epi32::<N>(_mm256_add_epi32(data2_6_hi, round)),
+                round,
+            )
+        } else {
+            const N: i32 = CONST_BITS + PASS1_BITS; // 15
+            let round = _mm256_set1_epi32(1 << (N - 1));
+            (
+                _mm256_srai_epi32::<N>(_mm256_add_epi32(data2_6_lo, round)),
+                _mm256_srai_epi32::<N>(_mm256_add_epi32(data2_6_hi, round)),
+                round,
+            )
+        };
+        let out2_6 = _mm256_packs_epi32(data2_6_lo, data2_6_hi);
+
+        // ---- Odd part ----
+
+        let z3_4 = _mm256_add_epi16(t8, t5); // z3_4 = tmp4_5 + tmp6_7
+
+        // Swap halves for z4_3
+        let z4_3 = _mm256_permute2x128_si256(z3_4, z3_4, 0x01);
+
+        // Interleave z3, z4 for vpmaddwd
+        let z_interleaved_lo = _mm256_unpacklo_epi16(z3_4, z4_3);
+        let z_interleaved_hi = _mm256_unpackhi_epi16(z3_4, z4_3);
+
+        // z3 = z3 * (F_1_175 - F_1_961) + z4 * F_1_175
+        // z4 = z3 * F_1_175 + z4 * (F_1_175 - F_0_390)
+        let const_z34 = _mm256_set_epi16(
+            F_1_175_MINUS_0_390,
+            F_1_175,
+            F_1_175_MINUS_0_390,
+            F_1_175,
+            F_1_175_MINUS_0_390,
+            F_1_175,
+            F_1_175_MINUS_0_390,
+            F_1_175,
+            F_1_175_MINUS_1_961,
+            F_1_175,
+            F_1_175_MINUS_1_961,
+            F_1_175,
+            F_1_175_MINUS_1_961,
+            F_1_175,
+            F_1_175_MINUS_1_961,
+            F_1_175,
+        );
+
+        let z3_z4_lo = _mm256_madd_epi16(z_interleaved_lo, const_z34);
+        let z3_z4_hi = _mm256_madd_epi16(z_interleaved_hi, const_z34);
+
+        // tmp4/tmp5 calculation
+        // tmp4 = tmp4 * (F_0_298 - F_0_899) + tmp7 * -F_0_899
+        // tmp5 = tmp5 * (F_2_053 - F_2_562) + tmp6 * -F_2_562
+        let tmp7_6 = _mm256_permute2x128_si256(t5, t5, 0x01);
+        let tmp45_interleaved_lo = _mm256_unpacklo_epi16(t8, tmp7_6);
+        let tmp45_interleaved_hi = _mm256_unpackhi_epi16(t8, tmp7_6);
+
+        let const_tmp45 = _mm256_set_epi16(
+            F_NEG_2_562,
+            F_2_053_MINUS_2_562,
+            F_NEG_2_562,
+            F_2_053_MINUS_2_562,
+            F_NEG_2_562,
+            F_2_053_MINUS_2_562,
+            F_NEG_2_562,
+            F_2_053_MINUS_2_562,
+            F_NEG_0_899,
+            F_0_298_MINUS_0_899,
+            F_NEG_0_899,
+            F_0_298_MINUS_0_899,
+            F_NEG_0_899,
+            F_0_298_MINUS_0_899,
+            F_NEG_0_899,
+            F_0_298_MINUS_0_899,
+        );
+
+        let tmp4_5_lo = _mm256_madd_epi16(tmp45_interleaved_lo, const_tmp45);
+        let tmp4_5_hi = _mm256_madd_epi16(tmp45_interleaved_hi, const_tmp45);
+
+        // data7_5 = tmp4_5 + z3_z4
+        let data7_5_lo = _mm256_add_epi32(tmp4_5_lo, z3_z4_lo);
+        let data7_5_hi = _mm256_add_epi32(tmp4_5_hi, z3_z4_hi);
+
+        let out7_5 = if pass1 {
+            const N: i32 = CONST_BITS - PASS1_BITS;
+            _mm256_packs_epi32(
+                _mm256_srai_epi32::<N>(_mm256_add_epi32(data7_5_lo, round32)),
+                _mm256_srai_epi32::<N>(_mm256_add_epi32(data7_5_hi, round32)),
+            )
+        } else {
+            const N: i32 = CONST_BITS + PASS1_BITS;
+            _mm256_packs_epi32(
+                _mm256_srai_epi32::<N>(_mm256_add_epi32(data7_5_lo, round32)),
+                _mm256_srai_epi32::<N>(_mm256_add_epi32(data7_5_hi, round32)),
+            )
+        };
+
+        // tmp6/tmp7 calculation
+        // tmp6 = tmp6 * (F_3_072 - F_2_562) + tmp5 * -F_2_562
+        // tmp7 = tmp7 * (F_1_501 - F_0_899) + tmp4 * -F_0_899
+        let tmp5_4 = _mm256_permute2x128_si256(t8, t8, 0x01);
+        let tmp67_interleaved_lo = _mm256_unpacklo_epi16(t5, tmp5_4);
+        let tmp67_interleaved_hi = _mm256_unpackhi_epi16(t5, tmp5_4);
+
+        let const_tmp67 = _mm256_set_epi16(
+            F_NEG_0_899,
+            F_1_501_MINUS_0_899,
+            F_NEG_0_899,
+            F_1_501_MINUS_0_899,
+            F_NEG_0_899,
+            F_1_501_MINUS_0_899,
+            F_NEG_0_899,
+            F_1_501_MINUS_0_899,
+            F_NEG_2_562,
+            F_3_072_MINUS_2_562,
+            F_NEG_2_562,
+            F_3_072_MINUS_2_562,
+            F_NEG_2_562,
+            F_3_072_MINUS_2_562,
+            F_NEG_2_562,
+            F_3_072_MINUS_2_562,
+        );
+
+        let tmp6_7_lo = _mm256_madd_epi16(tmp67_interleaved_lo, const_tmp67);
+        let tmp6_7_hi = _mm256_madd_epi16(tmp67_interleaved_hi, const_tmp67);
+
+        // data3_1 = tmp6_7 + z3_z4
+        let data3_1_lo = _mm256_add_epi32(tmp6_7_lo, z3_z4_lo);
+        let data3_1_hi = _mm256_add_epi32(tmp6_7_hi, z3_z4_hi);
+
+        let out3_1 = if pass1 {
+            const N: i32 = CONST_BITS - PASS1_BITS;
+            _mm256_packs_epi32(
+                _mm256_srai_epi32::<N>(_mm256_add_epi32(data3_1_lo, round32)),
+                _mm256_srai_epi32::<N>(_mm256_add_epi32(data3_1_hi, round32)),
+            )
+        } else {
+            const N: i32 = CONST_BITS + PASS1_BITS;
+            _mm256_packs_epi32(
+                _mm256_srai_epi32::<N>(_mm256_add_epi32(data3_1_lo, round32)),
+                _mm256_srai_epi32::<N>(_mm256_add_epi32(data3_1_hi, round32)),
+            )
+        };
+
+        // Output assignment
+        *ymm0 = out0_4;
+        *ymm1 = out3_1;
+        *ymm2 = out2_6;
+        *ymm3 = out7_5;
+    }
 }
 
 #[cfg(test)]
@@ -1520,6 +1874,7 @@ mod tests {
 
     #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
     #[test]
+    #[allow(unsafe_code)]
     fn test_avx2_matches_scalar_all_patterns() {
         use super::avx2::forward_dct_8x8_avx2;
 
@@ -1534,6 +1889,7 @@ mod tests {
             let mut coeffs_avx2 = [0i16; DCTSIZE2];
 
             forward_dct_8x8(&samples, &mut coeffs_scalar);
+            // SAFETY: Test runs only on x86_64 with AVX2 support
             unsafe { forward_dct_8x8_avx2(&samples, &mut coeffs_avx2) };
 
             assert_eq!(
@@ -1541,6 +1897,41 @@ mod tests {
                 "AVX2 SIMD should match scalar for pattern seed {}",
                 seed
             );
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[test]
+    #[allow(unsafe_code)]
+    fn test_avx2_i16_matches_scalar_all_patterns() {
+        use super::avx2::forward_dct_8x8_avx2_i16;
+
+        // Exhaustive test with many patterns
+        for seed in 0..20 {
+            let mut samples = [0i16; DCTSIZE2];
+            for i in 0..DCTSIZE2 {
+                samples[i] = ((i as i32 * (seed * 37 + 13) + seed * 7) % 256 - 128) as i16;
+            }
+
+            let mut coeffs_scalar = [0i16; DCTSIZE2];
+            let mut coeffs_avx2_i16 = [0i16; DCTSIZE2];
+
+            forward_dct_8x8(&samples, &mut coeffs_scalar);
+            // SAFETY: Test runs only on x86_64 with AVX2 support
+            unsafe { forward_dct_8x8_avx2_i16(&samples, &mut coeffs_avx2_i16) };
+
+            // Allow small differences due to 16-bit vs 32-bit intermediate precision
+            for i in 0..DCTSIZE2 {
+                let diff = (coeffs_scalar[i] as i32 - coeffs_avx2_i16[i] as i32).abs();
+                assert!(
+                    diff <= 1,
+                    "AVX2 i16 should match scalar within ±1 for pattern seed {}, coeff {}: scalar={}, i16={}",
+                    seed,
+                    i,
+                    coeffs_scalar[i],
+                    coeffs_avx2_i16[i]
+                );
+            }
         }
     }
 }

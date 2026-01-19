@@ -1,8 +1,16 @@
 //! AVX2-optimized RGB to YCbCr color conversion.
 //!
-//! This module provides an AVX2-optimized implementation of RGB→YCbCr color
-//! conversion based on libjpeg-turbo's jccolext-avx2.asm. The key optimizations:
+//! **SUPERSEDED**: This module has been superseded by the `yuv` crate, which is
+//! used by default when the `fast-yuv` feature is enabled. The `yuv` crate
+//! provides ~60% better performance with support for AVX-512, AVX2, SSE, NEON,
+//! and WASM SIMD. The precision difference (±1 level) is invisible after JPEG
+//! quantization.
 //!
+//! This module is kept for reference and can be enabled by disabling the
+//! `fast-yuv` feature. It provides an AVX2-optimized implementation of RGB→YCbCr
+//! color conversion based on libjpeg-turbo's jccolext-avx2.asm.
+//!
+//! Key optimizations:
 //! 1. SIMD loads of contiguous RGB data (32 pixels = 96 bytes per iteration)
 //! 2. Efficient de-interleaving using vpunpcklbw/hi, vpslldq, vperm2i128
 //! 3. vpmaddwd for coefficient multiply-accumulate

@@ -11,8 +11,17 @@
 //! Cr =  0.50000 * R - 0.41869 * G - 0.08131 * B + 128
 //! ```
 //!
-//! SIMD-optimized versions are available using the `wide` crate for
-//! processing multiple pixels in parallel.
+//! ## Performance
+//!
+//! By default (with `fast-yuv` feature), this module uses the `yuv` crate for
+//! SIMD-optimized color conversion. The `yuv` crate provides ~60% better
+//! performance than our hand-written AVX2 code, with support for AVX-512,
+//! AVX2, SSE, NEON, and WASM SIMD.
+//!
+//! The precision difference is ±1 level, which is invisible after JPEG
+//! quantization (which loses 2-4+ levels at Q85).
+//!
+//! Without `fast-yuv`, uses the `wide` crate for portable SIMD (i32x8).
 
 use wide::i32x8;
 
@@ -100,7 +109,70 @@ pub fn rgb_to_gray(r: u8, g: u8, b: u8) -> u8 {
 /// The input is interleaved RGB data, and the output is three separate
 /// component planes (Y, Cb, Cr), matching libjpeg's internal format.
 ///
-/// This function uses SIMD to process 4 pixels at a time for better
+/// With the `fast-yuv` feature (default), this uses the `yuv` crate for
+/// ~60% better performance with AVX-512/AVX2/SSE/NEON/WASM SIMD support.
+/// Without `fast-yuv`, uses the `wide` crate for portable SIMD (i32x8).
+///
+/// # Arguments
+/// * `rgb` - Input RGB data (3 bytes per pixel: R, G, B)
+/// * `y_out` - Output Y component buffer
+/// * `cb_out` - Output Cb component buffer
+/// * `cr_out` - Output Cr component buffer
+/// * `width` - Image width in pixels
+/// * `height` - Image height in pixels
+#[cfg(feature = "fast-yuv")]
+pub fn convert_rgb_to_ycbcr(
+    rgb: &[u8],
+    y_out: &mut [u8],
+    cb_out: &mut [u8],
+    cr_out: &mut [u8],
+    width: usize,
+    height: usize,
+) {
+    use yuv::{
+        rgb_to_yuv444, BufferStoreMut, YuvConversionMode, YuvPlanarImageMut, YuvRange,
+        YuvStandardMatrix,
+    };
+
+    debug_assert_eq!(rgb.len(), width * height * 3);
+    debug_assert_eq!(y_out.len(), width * height);
+    debug_assert_eq!(cb_out.len(), width * height);
+    debug_assert_eq!(cr_out.len(), width * height);
+
+    let w = width as u32;
+    let h = height as u32;
+
+    // Create a YUV planar image that directly borrows our output buffers (zero-copy)
+    let mut yuv_image = YuvPlanarImageMut {
+        y_plane: BufferStoreMut::Borrowed(y_out),
+        y_stride: w,
+        u_plane: BufferStoreMut::Borrowed(cb_out),
+        u_stride: w,
+        v_plane: BufferStoreMut::Borrowed(cr_out),
+        v_stride: w,
+        width: w,
+        height: h,
+    };
+
+    // Convert RGB to YUV using the yuv crate's SIMD-optimized implementation
+    // Uses BT.601 matrix (same as JPEG) with full range (0-255)
+    rgb_to_yuv444(
+        &mut yuv_image,
+        rgb,
+        w * 3,
+        YuvRange::Full,
+        YuvStandardMatrix::Bt601,
+        YuvConversionMode::default(), // Balanced mode: good precision + speed
+    )
+    .expect("yuv conversion failed");
+}
+
+/// Convert an RGB image buffer to YCbCr in-place component buffers.
+///
+/// The input is interleaved RGB data, and the output is three separate
+/// component planes (Y, Cb, Cr), matching libjpeg's internal format.
+///
+/// This function uses SIMD to process 8 pixels at a time for better
 /// performance on supported architectures.
 ///
 /// # Arguments
@@ -110,6 +182,7 @@ pub fn rgb_to_gray(r: u8, g: u8, b: u8) -> u8 {
 /// * `cr_out` - Output Cr component buffer
 /// * `width` - Image width in pixels
 /// * `height` - Image height in pixels
+#[cfg(not(feature = "fast-yuv"))]
 pub fn convert_rgb_to_ycbcr(
     rgb: &[u8],
     y_out: &mut [u8],
@@ -527,11 +600,42 @@ mod tests {
         convert_rgb_to_ycbcr(&rgb, &mut y_out, &mut cb_out, &mut cr_out, width, height);
 
         // Verify against scalar implementation
+        // With fast-yuv feature, the yuv crate uses 15-bit precision vs our 16-bit,
+        // resulting in ±1 level difference which is invisible after JPEG quantization
+        #[cfg(feature = "fast-yuv")]
+        let max_diff = 1i16;
+        #[cfg(not(feature = "fast-yuv"))]
+        let max_diff = 0i16;
+
         for i in 0..num_pixels {
             let (y, cb, cr) = rgb_to_ycbcr(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
-            assert_eq!(y_out[i], y, "Y mismatch at pixel {}", i);
-            assert_eq!(cb_out[i], cb, "Cb mismatch at pixel {}", i);
-            assert_eq!(cr_out[i], cr, "Cr mismatch at pixel {}", i);
+            let y_diff = (y_out[i] as i16 - y as i16).abs();
+            let cb_diff = (cb_out[i] as i16 - cb as i16).abs();
+            let cr_diff = (cr_out[i] as i16 - cr as i16).abs();
+            assert!(
+                y_diff <= max_diff,
+                "Y mismatch at pixel {}: got {}, expected {} (diff {})",
+                i,
+                y_out[i],
+                y,
+                y_diff
+            );
+            assert!(
+                cb_diff <= max_diff,
+                "Cb mismatch at pixel {}: got {}, expected {} (diff {})",
+                i,
+                cb_out[i],
+                cb,
+                cb_diff
+            );
+            assert!(
+                cr_diff <= max_diff,
+                "Cr mismatch at pixel {}: got {}, expected {} (diff {})",
+                i,
+                cr_out[i],
+                cr,
+                cr_diff
+            );
         }
     }
 

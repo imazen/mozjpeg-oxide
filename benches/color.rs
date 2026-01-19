@@ -4,6 +4,10 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughpu
 use mozjpeg_rs::color::{convert_rgb_to_gray, convert_rgb_to_ycbcr, rgb_to_ycbcr};
 #[cfg(target_arch = "x86_64")]
 use mozjpeg_rs::color_avx2::convert_rgb_to_ycbcr_dispatch;
+use yuv::{
+    rgb_to_yuv444, YuvChromaSubsampling, YuvConversionMode, YuvPlanarImageMut, YuvRange,
+    YuvStandardMatrix,
+};
 
 fn bench_rgb_to_ycbcr_scalar(c: &mut Criterion) {
     let mut group = c.benchmark_group("color_scalar");
@@ -128,6 +132,42 @@ fn bench_convert_rgb_to_ycbcr_avx2(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_convert_rgb_to_ycbcr_yuv_crate(c: &mut Criterion) {
+    let mut group = c.benchmark_group("color_yuv_crate");
+
+    for (name, width, height) in [
+        ("64x64", 64u32, 64u32),
+        ("256x256", 256, 256),
+        ("512x512", 512, 512),
+        ("1920x1080", 1920, 1080),
+    ] {
+        let num_pixels = (width * height) as usize;
+        let rgb: Vec<u8> = (0..num_pixels * 3)
+            .map(|i| ((i * 17) % 256) as u8)
+            .collect();
+
+        // Pre-allocate the YUV image to avoid allocation in the benchmark loop
+        let mut yuv_image = YuvPlanarImageMut::alloc(width, height, YuvChromaSubsampling::Yuv444);
+
+        group.throughput(Throughput::Elements(num_pixels as u64));
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                rgb_to_yuv444(
+                    &mut yuv_image,
+                    black_box(&rgb),
+                    width * 3,
+                    YuvRange::Full,
+                    YuvStandardMatrix::Bt601,
+                    YuvConversionMode::default(), // Balanced mode
+                )
+                .expect("yuv conversion failed");
+            })
+        });
+    }
+
+    group.finish();
+}
+
 #[cfg(target_arch = "x86_64")]
 criterion_group!(
     benches,
@@ -135,6 +175,7 @@ criterion_group!(
     bench_convert_rgb_to_ycbcr,
     bench_convert_rgb_to_gray,
     bench_convert_rgb_to_ycbcr_avx2,
+    bench_convert_rgb_to_ycbcr_yuv_crate,
 );
 
 #[cfg(not(target_arch = "x86_64"))]
@@ -143,6 +184,7 @@ criterion_group!(
     bench_rgb_to_ycbcr_scalar,
     bench_convert_rgb_to_ycbcr,
     bench_convert_rgb_to_gray,
+    bench_convert_rgb_to_ycbcr_yuv_crate,
 );
 
 criterion_main!(benches);

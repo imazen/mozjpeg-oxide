@@ -163,16 +163,24 @@ impl SimdEntropyEncoder {
         dc_table: &DerivedTable,
         ac_table: &DerivedTable,
     ) {
-        // Scalar zigzag reorder + sign handling
+        // Scalar zigzag reorder + sign handling for AC coefficients only
+        // DC (position 0) is NOT sign-adjusted here because encode_dc_fast handles it
         let mut temp = [0i16; DCTSIZE2];
         for (zigzag_pos, &natural_pos) in JPEG_NATURAL_ORDER.iter().enumerate() {
             let value = block[natural_pos];
             // Sign handling: for negative values, compute value - 1
-            temp[zigzag_pos] = if value < 0 { value - 1 } else { value };
+            // Skip position 0 (DC) - encode_dc_fast handles sign adjustment
+            temp[zigzag_pos] = if zigzag_pos == 0 {
+                value
+            } else if value < 0 {
+                value - 1
+            } else {
+                value
+            };
         }
 
-        // Encode DC
-        self.encode_dc_fast(temp[0], component, dc_table);
+        // Encode DC (uses original value, not sign-adjusted)
+        self.encode_dc_fast(block[0], component, dc_table);
 
         // Build non-zero mask
         let mut nonzero_mask: u64 = 0;
@@ -199,13 +207,18 @@ impl SimdEntropyEncoder {
         ac_table: &DerivedTable,
     ) {
         // Step 1: Reorder to zigzag and handle sign, build non-zero mask
+        // Note: zigzag_reorder_and_sign_sse2 applies sign adjustment to ALL coefficients
+        // including DC at position 0, but we use block[0] for DC encoding since
+        // encode_dc_fast handles sign adjustment internally.
         let mut temp = [0i16; DCTSIZE2];
         let nonzero_mask = self.zigzag_reorder_and_sign_sse2(block, &mut temp);
 
-        // Step 2: Encode DC coefficient
-        self.encode_dc_fast(temp[0], component, dc_table);
+        // Step 2: Encode DC coefficient (use original block[0], not sign-adjusted temp[0])
+        // encode_dc_fast handles sign adjustment for negative DC differentials
+        self.encode_dc_fast(block[0], component, dc_table);
 
         // Step 3: Encode AC coefficients using tzcnt-based iteration
+        // temp[1..63] are already sign-adjusted for AC encoding
         self.encode_ac_tzcnt(&temp, nonzero_mask, ac_table);
     }
 

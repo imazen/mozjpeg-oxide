@@ -7,7 +7,6 @@
 //!
 //! Uses codec-eval for perceptual quality metrics.
 
-use codec_eval::{decode::jpeg_decode_callback, EvalSession, ImageData, MetricConfig};
 use mozjpeg_rs::{Encoder, Subsampling, TrellisConfig};
 use std::fs::File;
 use std::path::Path;
@@ -17,6 +16,7 @@ const DEBUG_INSTRUMENTATION: bool = true;
 
 /// Configuration for a progressive test case
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ProgressiveTestConfig {
     name: &'static str,
     quality: u8,

@@ -34,7 +34,7 @@ fn main() {
         let mut total_simple = 0usize;
         let mut total_opt = 0usize;
         let mut total_c = 0usize;
-        let mut count = 0;
+        let mut _count = 0;
 
         let mut entries: Vec<_> = std::fs::read_dir(corpus_path)
             .unwrap()
@@ -75,7 +75,7 @@ fn main() {
                 total_simple += simple.len();
                 total_opt += opt.len();
                 total_c += c_jpeg.len();
-                count += 1;
+                _count += 1;
             }
         }
 

@@ -395,6 +395,7 @@ unsafe fn dodct(
     (out0_4, out3_1, out2_6, out7_5)
 }
 
+#[allow(clippy::identity_op)]
 fn scalar_dct(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
     const CONST_BITS: i32 = 13;
     const PASS1_BITS: i32 = 2;

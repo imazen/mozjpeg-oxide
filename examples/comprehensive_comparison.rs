@@ -31,7 +31,7 @@ fn main() {
             .encode_rgb(rgb_data, width, height)
             .unwrap();
 
-        let c = encode_c_baseline(&rgb_data, width, height, quality, true);
+        let c = encode_c_baseline(rgb_data, width, height, quality, true);
         let diff = (rust.len() as f64 / c.len() as f64 - 1.0) * 100.0;
         println!(
             "{:>4} {:>8} {:>8} {:>+7.2}%",
@@ -55,7 +55,7 @@ fn main() {
             .encode_rgb(rgb_data, width, height)
             .unwrap();
 
-        let c = encode_c_baseline(&rgb_data, width, height, quality, false);
+        let c = encode_c_baseline(rgb_data, width, height, quality, false);
         let diff = (rust.len() as f64 / c.len() as f64 - 1.0) * 100.0;
         println!(
             "{:>4} {:>8} {:>8} {:>+7.2}%",

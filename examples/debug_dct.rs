@@ -69,6 +69,7 @@ fn print_block(data: &[i16; DCTSIZE2]) {
 }
 
 // Scalar DCT for reference
+#[allow(clippy::identity_op)]
 fn scalar_dct(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
     const CONST_BITS: i32 = 13;
     const PASS1_BITS: i32 = 2;

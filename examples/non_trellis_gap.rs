@@ -88,7 +88,6 @@ fn main() {
 fn analyze_jpeg(jpeg: &[u8]) -> HashMap<String, usize> {
     let mut parts = HashMap::new();
     let mut i = 0;
-    let mut entropy_start = 0;
 
     while i < jpeg.len() - 1 {
         if jpeg[i] == 0xFF {
@@ -115,7 +114,7 @@ fn analyze_jpeg(jpeg: &[u8]) -> HashMap<String, usize> {
                 0xDA => {
                     let len = ((jpeg[i + 2] as usize) << 8) | (jpeg[i + 3] as usize);
                     parts.insert("SOS header".to_string(), len + 2);
-                    entropy_start = i + len + 2;
+                    let entropy_start = i + len + 2;
                     // Skip to end of entropy data
                     let mut j = entropy_start;
                     while j < jpeg.len() - 1 {

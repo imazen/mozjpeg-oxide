@@ -110,7 +110,6 @@ fn parse_scans(jpeg: &[u8]) -> Vec<ScanSpec> {
             let ah_al = jpeg[i + 2];
             let ah = ah_al >> 4;
             let al = ah_al & 0x0F;
-            i += 3;
 
             // Skip to end of SOS header
             let header_end = sos_start + 2 + length;

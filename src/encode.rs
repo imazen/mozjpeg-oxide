@@ -47,6 +47,8 @@ use crate::sample;
 use crate::scan_optimize::{generate_search_scans, ScanSearchConfig, ScanSelector};
 use crate::scan_trial::ScanTrialEncoder;
 use crate::simd::SimdOps;
+#[cfg(target_arch = "x86_64")]
+use crate::simd::x86_64::entropy::SimdEntropyEncoder;
 use crate::trellis::trellis_quantize_block;
 use crate::types::{Limits, PixelDensity, Preset, Subsampling, TrellisConfig};
 
@@ -2779,44 +2781,106 @@ impl Encoder {
             let scan = &scans[0];
             marker_writer.write_sos(scan, &components)?;
 
-            let output = marker_writer.into_inner();
-            let mut bit_writer = BitWriter::new(output);
-            let mut entropy = EntropyEncoder::new(&mut bit_writer);
+            let mut output = marker_writer.into_inner();
 
-            // Encode from stored blocks with restart marker support
-            y_idx = 0;
-            c_idx = 0;
-            let restart_interval = self.restart_interval as usize;
-            let mut mcu_count = 0usize;
-            let mut restart_num = 0u8;
+            // Use SIMD entropy encoder on x86_64 for ~2x faster encoding
+            #[cfg(target_arch = "x86_64")]
+            {
+                let mut simd_entropy = SimdEntropyEncoder::new();
 
-            for _mcu_row in 0..mcu_rows {
-                for _mcu_col in 0..mcu_cols {
-                    // Emit restart marker if needed (before this MCU, not first)
-                    if restart_interval > 0
-                        && mcu_count > 0
-                        && mcu_count.is_multiple_of(restart_interval)
-                    {
-                        entropy.emit_restart(restart_num)?;
-                        restart_num = restart_num.wrapping_add(1) & 0x07;
+                // Encode from stored blocks with restart marker support
+                y_idx = 0;
+                c_idx = 0;
+                let restart_interval = self.restart_interval as usize;
+                let mut mcu_count = 0usize;
+                let mut restart_num = 0u8;
+
+                for _mcu_row in 0..mcu_rows {
+                    for _mcu_col in 0..mcu_cols {
+                        // Emit restart marker if needed (before this MCU, not first)
+                        if restart_interval > 0
+                            && mcu_count > 0
+                            && mcu_count.is_multiple_of(restart_interval)
+                        {
+                            simd_entropy.emit_restart(restart_num);
+                            restart_num = restart_num.wrapping_add(1) & 0x07;
+                        }
+
+                        // Y blocks
+                        for _ in 0..blocks_per_mcu_y {
+                            simd_entropy.encode_block(
+                                &y_blocks[y_idx],
+                                0,
+                                &opt_dc_luma,
+                                &opt_ac_luma,
+                            );
+                            y_idx += 1;
+                        }
+                        // Cb block
+                        simd_entropy.encode_block(
+                            &cb_blocks[c_idx],
+                            1,
+                            &opt_dc_chroma,
+                            &opt_ac_chroma,
+                        );
+                        // Cr block
+                        simd_entropy.encode_block(
+                            &cr_blocks[c_idx],
+                            2,
+                            &opt_dc_chroma,
+                            &opt_ac_chroma,
+                        );
+                        c_idx += 1;
+                        mcu_count += 1;
                     }
-
-                    // Y blocks
-                    for _ in 0..blocks_per_mcu_y {
-                        entropy.encode_block(&y_blocks[y_idx], 0, &opt_dc_luma, &opt_ac_luma)?;
-                        y_idx += 1;
-                    }
-                    // Cb block
-                    entropy.encode_block(&cb_blocks[c_idx], 1, &opt_dc_chroma, &opt_ac_chroma)?;
-                    // Cr block
-                    entropy.encode_block(&cr_blocks[c_idx], 2, &opt_dc_chroma, &opt_ac_chroma)?;
-                    c_idx += 1;
-                    mcu_count += 1;
                 }
+
+                simd_entropy.flush();
+                output.write_all(simd_entropy.get_buffer())?;
             }
 
-            bit_writer.flush()?;
-            let mut output = bit_writer.into_inner();
+            // Fallback for non-x86_64 platforms
+            #[cfg(not(target_arch = "x86_64"))]
+            {
+                let mut bit_writer = BitWriter::new(output);
+                let mut entropy = EntropyEncoder::new(&mut bit_writer);
+
+                // Encode from stored blocks with restart marker support
+                y_idx = 0;
+                c_idx = 0;
+                let restart_interval = self.restart_interval as usize;
+                let mut mcu_count = 0usize;
+                let mut restart_num = 0u8;
+
+                for _mcu_row in 0..mcu_rows {
+                    for _mcu_col in 0..mcu_cols {
+                        // Emit restart marker if needed (before this MCU, not first)
+                        if restart_interval > 0
+                            && mcu_count > 0
+                            && mcu_count.is_multiple_of(restart_interval)
+                        {
+                            entropy.emit_restart(restart_num)?;
+                            restart_num = restart_num.wrapping_add(1) & 0x07;
+                        }
+
+                        // Y blocks
+                        for _ in 0..blocks_per_mcu_y {
+                            entropy.encode_block(&y_blocks[y_idx], 0, &opt_dc_luma, &opt_ac_luma)?;
+                            y_idx += 1;
+                        }
+                        // Cb block
+                        entropy.encode_block(&cb_blocks[c_idx], 1, &opt_dc_chroma, &opt_ac_chroma)?;
+                        // Cr block
+                        entropy.encode_block(&cr_blocks[c_idx], 2, &opt_dc_chroma, &opt_ac_chroma)?;
+                        c_idx += 1;
+                        mcu_count += 1;
+                    }
+                }
+
+                bit_writer.flush()?;
+                output = bit_writer.into_inner();
+            }
+
             output.write_all(&[0xFF, 0xD9])?;
         } else {
             // Baseline mode: Encode directly (streaming)

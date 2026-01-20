@@ -74,9 +74,72 @@ impl SimdEntropyEncoder {
         }
     }
 
-    /// Reset DC predictions.
+    /// Reset DC predictions (called at restart markers).
     pub fn reset_dc(&mut self) {
         self.last_dc_val = [0; 4];
+    }
+
+    /// Emit a restart marker and reset DC predictions.
+    ///
+    /// Flushes the bit buffer (padding with 1-bits to byte boundary),
+    /// writes the RST marker (0xFFD0 + restart_num), and resets DC predictions.
+    pub fn emit_restart(&mut self, restart_num: u8) {
+        // Flush bit buffer (pads with 1-bits to byte boundary)
+        let bits_in_buffer = 64 - self.free_bits;
+        if bits_in_buffer > 0 {
+            let padding_bits = (8 - (bits_in_buffer % 8)) % 8;
+            let total_bits = bits_in_buffer + padding_bits;
+            let bytes_to_write = total_bits / 8;
+
+            let mut buffer = self.put_buffer << (64 - bits_in_buffer);
+            if padding_bits > 0 {
+                let padding = ((1u64 << padding_bits) - 1) << (64 - total_bits);
+                buffer |= padding;
+            }
+
+            for i in 0..bytes_to_write {
+                let byte = (buffer >> (56 - i * 8)) as u8;
+                self.buffer.push(byte);
+                if byte == 0xFF {
+                    self.buffer.push(0x00);
+                }
+            }
+        }
+
+        // Reset bit buffer
+        self.put_buffer = 0;
+        self.free_bits = 64;
+
+        // Write RST marker: 0xFF followed by 0xD0 + (restart_num % 8)
+        let rst_marker = 0xD0 + (restart_num & 0x07);
+        self.buffer.push(0xFF);
+        self.buffer.push(rst_marker);
+
+        // Reset DC predictions
+        self.reset_dc();
+    }
+
+    /// Get current output size (for progress tracking).
+    pub fn output_len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    /// Encode a single 8x8 block of DCT coefficients using SIMD.
+    ///
+    /// This is the safe wrapper that checks for SSE2 and dispatches to the
+    /// SIMD implementation. On x86_64, SSE2 is always available.
+    #[inline]
+    pub fn encode_block(
+        &mut self,
+        block: &[i16; DCTSIZE2],
+        component: usize,
+        dc_table: &DerivedTable,
+        ac_table: &DerivedTable,
+    ) {
+        // SAFETY: SSE2 is always available on x86_64
+        unsafe {
+            self.encode_block_sse2(block, component, dc_table, ac_table);
+        }
     }
 
     /// Encode a single 8x8 block of DCT coefficients using SIMD.
@@ -84,7 +147,7 @@ impl SimdEntropyEncoder {
     /// # Safety
     /// Requires SSE2 support.
     #[target_feature(enable = "sse2")]
-    pub unsafe fn encode_block_sse2(
+    unsafe fn encode_block_sse2(
         &mut self,
         block: &[i16; DCTSIZE2],
         component: usize,
@@ -347,6 +410,17 @@ impl SimdEntropyEncoder {
 
     /// Flush remaining bits and return the encoded data.
     pub fn finish(mut self) -> Vec<u8> {
+        self.flush_to_buffer();
+        self.buffer
+    }
+
+    /// Flush remaining bits to the internal buffer (without consuming self).
+    pub fn flush(&mut self) {
+        self.flush_to_buffer();
+    }
+
+    /// Internal: flush remaining bits to buffer.
+    fn flush_to_buffer(&mut self) {
         let bits_in_buffer = 64 - self.free_bits;
 
         if bits_in_buffer > 0 {
@@ -372,14 +446,28 @@ impl SimdEntropyEncoder {
                     self.buffer.push(0x00);
                 }
             }
-        }
 
-        self.buffer
+            // Clear the bit buffer
+            self.put_buffer = 0;
+            self.free_bits = 64;
+        }
     }
 
     /// Get the current output buffer for inspection.
     pub fn get_buffer(&self) -> &[u8] {
         &self.buffer
+    }
+
+    /// Take ownership of the output buffer.
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.buffer
+    }
+
+    /// Write the encoded data to the given output and clear the internal buffer.
+    pub fn write_to<W: std::io::Write>(&mut self, output: &mut W) -> std::io::Result<()> {
+        output.write_all(&self.buffer)?;
+        self.buffer.clear();
+        Ok(())
     }
 }
 

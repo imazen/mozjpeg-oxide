@@ -221,9 +221,7 @@ fn bench_simd_encoder(
 ) -> Vec<u8> {
     let mut encoder = SimdEntropyEncoder::new();
     for block in blocks {
-        unsafe {
-            encoder.encode_block_sse2(block, 0, dc_table, ac_table);
-        }
+        encoder.encode_block(block, 0, dc_table, ac_table);
     }
     encoder.finish()
 }

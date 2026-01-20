@@ -221,3 +221,56 @@ However, given that:
 
 It may be more productive to focus on other bottlenecks (color conversion, DCT)
 or accept that the current entropy encoder is "good enough" for production use.
+
+## PERF Analysis: Rust vs C mozjpeg (2026-01-19)
+
+### Baseline Mode (no trellis) - 512x512 image
+
+| Component | Rust Cycles | C Cycles | Slowdown |
+|-----------|-------------|----------|----------|
+| **Total** | 6.1B | 1.25B | **4.9x** |
+| Color conversion | 1.7B (28%) | 0.17B (14%) | **10x** |
+| Entropy encoding | 2.2B (36%) | 0.46B (37%) | **4.8x** |
+| DCT | 0.24B (4%) | 0.11B (9%) | **2.2x** |
+
+### Key Finding: Color Conversion Bug
+
+The encoder uses `simd/scalar.rs` for color conversion, NOT the `yuv` crate!
+The `fast-yuv` feature only affects `color.rs` which isn't used by the encoder.
+**This alone accounts for 10x of the slowdown.**
+
+### C mozjpeg SIMD Functions (from perf)
+
+| Function | % Time | Description |
+|----------|--------|-------------|
+| `jsimd_huff_encode_one_block_sse2` | 37% | SIMD entropy encoding |
+| `jsimd_rgb_ycc_convert_avx2` | 14% | AVX2 color conversion |
+| `jsimd_fdct_islow_avx2` | 9% | AVX2 DCT |
+| `jsimd_quantize_avx2` | 6% | AVX2 quantization |
+| `jsimd_convsamp_avx2` | 7% | AVX2 sample conversion |
+
+### jchuff-sse2.asm Key Techniques
+
+From `/home/lilith/work/jpegli-rs/internal/jpegli-cpp/third_party/libjpeg-turbo/simd/x86_64/jchuff-sse2.asm`:
+
+1. **Fused zigzag reorder + sign handling**
+   - SSE2 shuffles (punpckldq, pshuflw, pinsrw) for zigzag
+   - pcmpgtw + paddw for sign handling in same pass
+
+2. **64KB lookup table for nbits**
+   - Direct mapping: value → bit count
+   - Avoids leading_zeros() at runtime
+
+3. **Speculative 8-byte writes with SIMD 0xFF detection**
+   - Write 8 bytes first (optimistic)
+   - pcmpeqb + pmovmskb to find 0xFF bytes
+   - Only fixup when stuffing needed
+
+4. **tzcnt for zero-run detection**
+   - Uses trailing zero count to skip zeros efficiently
+
+### Priority Fixes
+
+1. **Fix color conversion (10x potential)** - Make encoder use yuv crate
+2. **Port jchuff-sse2 (4.8x potential)** - SIMD entropy encoding
+3. **Improve DCT (2.2x potential)** - Better AVX2 intrinsics

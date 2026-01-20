@@ -462,7 +462,14 @@ mod tests {
         let mut cr_scalar = vec![0u8; num_pixels];
 
         // Run AVX2 version
-        convert_rgb_to_ycbcr_avx2(token, &rgb, &mut y_avx2, &mut cb_avx2, &mut cr_avx2, num_pixels);
+        convert_rgb_to_ycbcr_avx2(
+            token,
+            &rgb,
+            &mut y_avx2,
+            &mut cb_avx2,
+            &mut cr_avx2,
+            num_pixels,
+        );
 
         // Run scalar version
         for i in 0..num_pixels {
@@ -520,7 +527,14 @@ mod tests {
         let mut cr_scalar = vec![0u8; num_pixels];
 
         let token = Avx2Token::try_new().unwrap();
-        convert_rgb_to_ycbcr_avx2(token, &rgb, &mut y_avx2, &mut cb_avx2, &mut cr_avx2, num_pixels);
+        convert_rgb_to_ycbcr_avx2(
+            token,
+            &rgb,
+            &mut y_avx2,
+            &mut cb_avx2,
+            &mut cr_avx2,
+            num_pixels,
+        );
 
         for i in 0..num_pixels {
             let (y, cb, cr) =

@@ -231,7 +231,7 @@ impl SimdEntropyEncoder {
 
             // Each i16 becomes 2 bytes in movemask, we need 1 bit per i16
             // So we take bits 0, 2, 4, 6, 8, 10, 12, 14 and compress them
-            let compressed = ((mask_bits & 0x0001) >> 0)
+            let compressed = (mask_bits & 0x0001)
                 | ((mask_bits & 0x0004) >> 1)
                 | ((mask_bits & 0x0010) >> 2)
                 | ((mask_bits & 0x0040) >> 3)

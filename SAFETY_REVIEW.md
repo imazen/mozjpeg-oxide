@@ -203,3 +203,139 @@ The codebase demonstrates good safety practices:
 - Input validation on public API boundaries
 
 The one medium issue (misleading comment) should be addressed for code clarity but does not represent an actual safety vulnerability.
+
+---
+
+## 7. Archmage Integration Analysis
+
+The `archmage` crate (`~/work/archmage`) provides safe SIMD abstractions using zero-sized capability tokens. This section analyzes how it could reduce unsafe code in mozjpeg-rs.
+
+### How Archmage Works
+
+1. **Capability tokens** prove CPU features are available at the type level
+2. **`#[simd_fn]` macro** wraps functions with `#[target_feature]`, making value-based intrinsics safe
+3. **Reference-based load/store** wrappers replace unsafe pointer-based intrinsics
+4. **Runtime detection** via `Avx2Token::try_new()` returns `Option<Avx2Token>`
+
+### Intrinsics Classification
+
+#### SAFE with archmage (value-based, ~95% of usage)
+
+These intrinsics are safe inside `#[target_feature]` context (Rust 1.92+) and can be used with archmage's `#[simd_fn]` macro:
+
+| Category | Intrinsics | Count |
+|----------|-----------|-------|
+| **Creation** | `_mm256_set1_epi32`, `_mm256_setzero_si256`, `_mm256_set_epi32`, `_mm_set_epi16` | 25 |
+| **Arithmetic** | `_mm256_add_epi32`, `_mm256_sub_epi32`, `_mm256_mullo_epi32`, `_mm_add_epi16` | 60+ |
+| **Shuffle** | `_mm256_unpacklo_epi32`, `_mm256_permute2x128_si256`, `_mm256_slli_si256` | 40+ |
+| **Compare** | `_mm256_max_epi32`, `_mm256_min_epi32`, `_mm_cmpgt_epi16`, `_mm_cmpeq_epi16` | 10 |
+| **Convert** | `_mm256_cvtepi16_epi32`, `_mm256_castsi256_si128`, `_mm_packs_epi32` | 8 |
+| **Shift** | `_mm256_srai_epi32`, `_mm256_slli_epi32`, `_mm256_srli_epi32` | 20+ |
+| **Bitwise** | `_mm256_or_si256`, `_mm256_and_si256`, `_mm_movemask_epi8` | 5 |
+| **MAD** | `_mm256_madd_epi16` | 8 |
+
+#### STILL NEED UNSAFE (pointer-based loads/stores)
+
+These require unsafe because they take raw pointers. Archmage provides safe wrappers using references.
+
+| File | Intrinsic | Count | Notes |
+|------|-----------|-------|-------|
+| `simd/x86_64/avx2.rs` | `_mm_loadu_si128` | 1 | Load 8×i16 |
+| `simd/x86_64/avx2.rs` | `_mm_storeu_si128` | 8 | Store DCT coefficients |
+| `dct.rs` | `_mm_loadu_si128` | 1 | Load row |
+| `dct.rs` | `_mm_storeu_si128` | 8 | Store DCT coefficients |
+| `dct.rs` | `_mm256_loadu_si256` | 4 | Load samples (i16 variant) |
+| `dct.rs` | `_mm256_storeu_si256` | 4 | Store coefficients (i16 variant) |
+| `color_avx2.rs` | `_mm256_loadu_si256` | 3 | Load RGB data |
+| `color_avx2.rs` | `_mm256_storeu_si256` | 3 | Store Y/Cb/Cr data |
+
+**Total: 32 pointer-based intrinsics** (out of ~200+ total intrinsic calls)
+
+### Recommended Archmage Migration
+
+#### Step 1: Add archmage dependency
+
+```toml
+[dependencies]
+archmage = { path = "../archmage" }  # or version from crates.io
+```
+
+#### Step 2: Convert dispatch to token-based
+
+**Before:**
+```rust
+#[target_feature(enable = "avx2")]
+pub unsafe fn forward_dct_8x8_avx2(samples: &[i16; 64], coeffs: &mut [i16; 64]) {
+    // ... intrinsics ...
+}
+
+pub fn forward_dct_8x8(samples: &[i16; 64], coeffs: &mut [i16; 64]) {
+    // SAFETY: caller must ensure AVX2
+    unsafe { forward_dct_8x8_avx2(samples, coeffs) }
+}
+```
+
+**After:**
+```rust
+use archmage::{Avx2Token, simd_fn};
+
+#[simd_fn]
+pub fn forward_dct_8x8_avx2(token: Avx2Token, samples: &[i16; 64], coeffs: &mut [i16; 64]) {
+    // Value-based intrinsics are now safe!
+    let v = _mm256_set1_epi32(123);  // No unsafe needed
+
+    // Only loads/stores need archmage wrappers
+    let row = archmage::ops::load_i16x8(token, &samples[0..8].try_into().unwrap());
+    // ...
+}
+
+// Safe dispatch
+pub fn forward_dct_8x8(samples: &[i16; 64], coeffs: &mut [i16; 64]) {
+    if let Some(token) = Avx2Token::try_new() {
+        forward_dct_8x8_avx2(token, samples, coeffs);
+    } else {
+        forward_dct_8x8_scalar(samples, coeffs);
+    }
+}
+```
+
+#### Step 3: Wrap remaining unsafe loads/stores
+
+Archmage provides safe wrappers. For types not covered, add to archmage's `ops` module:
+
+```rust
+// In archmage ops module (would need to add i16x8 support)
+pub fn load_i16x8(token: Avx2Token, data: &[i16; 8]) -> __m128i {
+    unsafe { _mm_loadu_si128(data.as_ptr() as *const __m128i) }
+}
+
+pub fn store_i16x8(token: Avx2Token, data: &mut [i16; 8], v: __m128i) {
+    unsafe { _mm_storeu_si128(data.as_mut_ptr() as *mut __m128i, v) }
+}
+```
+
+### Summary
+
+| Category | Current State | With Archmage |
+|----------|---------------|---------------|
+| Value intrinsics (~170) | `unsafe` block required | Safe via `#[simd_fn]` |
+| Load/store intrinsics (32) | `unsafe` pointer ops | Safe via reference wrappers |
+| CPU dispatch | Manual `is_x86_feature_detected!` | Token-based `try_new()` |
+| Type safety | None (can call AVX2 fn on SSE2 CPU) | Compile-time via token param |
+
+**Estimated unsafe reduction: ~85%** (from ~200 unsafe intrinsic calls to ~32 wrapped in archmage ops)
+
+### Intrinsics Needing Archmage Wrapper Functions
+
+Archmage currently has wrappers for `f32` types. For mozjpeg-rs, we'd need integer variants:
+
+| Needed Wrapper | Type | Usage |
+|----------------|------|-------|
+| `load_i16x8` | `&[i16; 8] → __m128i` | DCT row load |
+| `store_i16x8` | `__m128i → &mut [i16; 8]` | DCT coefficient store |
+| `load_i16x16` | `&[i16; 16] → __m256i` | DCT i16 variant |
+| `store_i16x16` | `__m256i → &mut [i16; 16]` | DCT i16 variant |
+| `load_u8x32` | `&[u8; 32] → __m256i` | RGB load |
+| `store_u8x32` | `__m256i → &mut [u8; 32]` | Y/Cb/Cr store |
+
+These would be straightforward additions to archmage's `ops` module.

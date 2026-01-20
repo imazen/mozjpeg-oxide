@@ -271,6 +271,40 @@ From `/home/lilith/work/jpegli-rs/internal/jpegli-cpp/third_party/libjpeg-turbo/
 
 ### Priority Fixes
 
-1. **Fix color conversion (10x potential)** - Make encoder use yuv crate
-2. **Port jchuff-sse2 (4.8x potential)** - SIMD entropy encoding
-3. **Improve DCT (2.2x potential)** - Better AVX2 intrinsics
+1. ~~**Fix color conversion (10x potential)** - Make encoder use yuv crate~~ ✅ DONE
+2. **Port jchuff-sse2 (5.6x potential)** - SIMD entropy encoding
+3. ~~**Improve DCT (2.2x potential)** - Better AVX2 intrinsics~~ ✅ DONE (1.6x remaining)
+
+## PERF Analysis: After Color + DCT Fixes (2026-01-19)
+
+### Baseline Mode (no trellis) - 512x512 image, with fast-yuv + simd-intrinsics
+
+| Component | Rust Cycles | C Cycles | Slowdown |
+|-----------|-------------|----------|----------|
+| **Total** | 4.46B | 1.72B | **2.59x** (was 4.9x) |
+| Color conversion | 0.14B (3%) | 0.22B (13%) | **Rust 1.6x faster!** |
+| Entropy encoding | 3.57B (80%) | 0.64B (37%) | **5.6x** |
+| DCT | 0.24B (5%) | 0.15B (9%) | **1.6x** |
+
+### What Was Fixed
+
+1. **Color conversion now uses yuv crate** - SimdOps::detect() routes to yuv crate's
+   AVX2/SSE/NEON implementation when `fast-yuv` feature is enabled (default).
+   Result: Rust is now 1.6x FASTER than C mozjpeg for color conversion!
+
+2. **DCT uses hand-written AVX2 intrinsics** - With `simd-intrinsics` feature,
+   uses `simd::x86_64::avx2::forward_dct_8x8` instead of multiversion scalar.
+   Result: DCT improved from 2.2x to 1.6x slower.
+
+### Remaining Bottleneck: Entropy Encoding
+
+The 2.59x slowdown is now **80% entropy encoding**. The jchuff-sse2 port is the
+only remaining optimization with significant impact potential (5.6x improvement).
+
+### Key Insight: fast-yuv vs simd-intrinsics
+
+- `fast-yuv` (default): Uses yuv crate for color conversion - essential, 10x speedup
+- `simd-intrinsics` (optional): Uses hand-written DCT intrinsics - 3% overall improvement
+
+The `simd-intrinsics` feature is NOT in defaults because the 3% improvement is marginal
+and the multiversion autovectorization is almost as good (93% of intrinsics perf).

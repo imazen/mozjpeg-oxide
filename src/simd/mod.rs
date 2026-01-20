@@ -33,6 +33,51 @@ pub mod x86_64;
 
 use crate::consts::DCTSIZE2;
 
+// ============================================================================
+// Fast YUV color conversion using the yuv crate (when feature enabled)
+// ============================================================================
+
+/// Convert RGB to YCbCr using the yuv crate's SIMD-optimized implementation.
+/// This is ~10x faster than the scalar multiversion implementation.
+#[cfg(feature = "fast-yuv")]
+fn convert_rgb_to_ycbcr_yuv(
+    rgb: &[u8],
+    y_out: &mut [u8],
+    cb_out: &mut [u8],
+    cr_out: &mut [u8],
+    num_pixels: usize,
+) {
+    use yuv::{
+        rgb_to_yuv444, BufferStoreMut, YuvConversionMode, YuvPlanarImageMut, YuvRange,
+        YuvStandardMatrix,
+    };
+
+    // Treat as 1D image (width=num_pixels, height=1)
+    let w = num_pixels as u32;
+    let h = 1u32;
+
+    let mut yuv_image = YuvPlanarImageMut {
+        y_plane: BufferStoreMut::Borrowed(y_out),
+        y_stride: w,
+        u_plane: BufferStoreMut::Borrowed(cb_out),
+        u_stride: w,
+        v_plane: BufferStoreMut::Borrowed(cr_out),
+        v_stride: w,
+        width: w,
+        height: h,
+    };
+
+    rgb_to_yuv444(
+        &mut yuv_image,
+        rgb,
+        w * 3,
+        YuvRange::Full,
+        YuvStandardMatrix::Bt601,
+        YuvConversionMode::default(),
+    )
+    .expect("yuv conversion failed");
+}
+
 /// Function pointer type for forward DCT.
 ///
 /// Signature: (samples, coeffs) where:
@@ -64,29 +109,40 @@ pub struct SimdOps {
 impl SimdOps {
     /// Select the best available implementations for the current CPU.
     ///
-    /// By default, uses `multiversion` for automatic SIMD dispatch via
-    /// autovectorization. This is safe and provides ~87% of intrinsics
-    /// performance.
-    ///
-    /// With the `simd-intrinsics` feature, uses hand-written AVX2 intrinsics
-    /// for maximum performance (~15% faster, but requires unsafe code).
+    /// Priority order:
+    /// 1. `fast-yuv` feature: Uses the `yuv` crate for color conversion (~10x faster)
+    /// 2. `simd-intrinsics` feature: Hand-written AVX2 intrinsics (~15% faster DCT)
+    /// 3. Default: `multiversion` autovectorization (safe, ~87% of intrinsics perf)
     #[must_use]
     pub fn detect() -> Self {
-        // With simd-intrinsics feature, use hand-written intrinsics for max perf
-        #[cfg(all(target_arch = "x86_64", feature = "simd-intrinsics"))]
-        {
-            if is_x86_feature_detected!("avx2") {
-                return Self {
-                    forward_dct: x86_64::avx2::forward_dct_8x8,
-                    color_convert_rgb_to_ycbcr: x86_64::avx2::convert_rgb_to_ycbcr,
-                };
-            }
-        }
+        // Color conversion: prefer yuv crate (fastest), then intrinsics, then scalar
+        #[cfg(feature = "fast-yuv")]
+        let color_fn: ColorConvertFn = convert_rgb_to_ycbcr_yuv;
 
-        // Default: use multiversion scalar (autovectorized, safe)
+        #[cfg(all(not(feature = "fast-yuv"), target_arch = "x86_64", feature = "simd-intrinsics"))]
+        let color_fn: ColorConvertFn = if is_x86_feature_detected!("avx2") {
+            x86_64::avx2::convert_rgb_to_ycbcr
+        } else {
+            scalar::convert_rgb_to_ycbcr
+        };
+
+        #[cfg(all(not(feature = "fast-yuv"), not(all(target_arch = "x86_64", feature = "simd-intrinsics"))))]
+        let color_fn: ColorConvertFn = scalar::convert_rgb_to_ycbcr;
+
+        // DCT: prefer intrinsics, then scalar with multiversion
+        #[cfg(all(target_arch = "x86_64", feature = "simd-intrinsics"))]
+        let dct_fn: ForwardDctFn = if is_x86_feature_detected!("avx2") {
+            x86_64::avx2::forward_dct_8x8
+        } else {
+            scalar::forward_dct_8x8
+        };
+
+        #[cfg(not(all(target_arch = "x86_64", feature = "simd-intrinsics")))]
+        let dct_fn: ForwardDctFn = scalar::forward_dct_8x8;
+
         Self {
-            forward_dct: scalar::forward_dct_8x8,
-            color_convert_rgb_to_ycbcr: scalar::convert_rgb_to_ycbcr,
+            forward_dct: dct_fn,
+            color_convert_rgb_to_ycbcr: color_fn,
         }
     }
 

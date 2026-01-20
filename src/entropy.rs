@@ -89,7 +89,6 @@ fn build_nonzero_mask(coeffs: &[i16; DCTSIZE2]) -> u64 {
     nonzero_mask
 }
 
-
 /// Entropy encoder state for a single scan.
 pub struct EntropyEncoder<'a, W: Write> {
     /// Bitstream writer
@@ -195,7 +194,8 @@ impl<'a, W: Write> EntropyEncoder<'a, W> {
         // Emit Huffman code and value bits in one operation
         let (code, size) = dc_table.get_code(nbits);
         if nbits > 0 {
-            self.writer.put_bits_combined(code, size, value as u32, nbits)?;
+            self.writer
+                .put_bits_combined(code, size, value as u32, nbits)?;
         } else if size > 0 {
             self.writer.put_bits(code, size)?;
         }
@@ -255,7 +255,8 @@ impl<'a, W: Write> EntropyEncoder<'a, W> {
                 // Symbol = (run << 4) | nbits - emit code and value together
                 let symbol = (run << 4) | nbits;
                 let (code, size) = ac_table.get_code(symbol);
-                self.writer.put_bits_combined(code, size, value as u32, nbits)?;
+                self.writer
+                    .put_bits_combined(code, size, value as u32, nbits)?;
 
                 run = 0;
             }

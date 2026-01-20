@@ -7,8 +7,8 @@
 
 use mozjpeg_rs::bitstream::VecBitWriter;
 use mozjpeg_rs::consts::{
-    AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES, DCTSIZE,
-    DCTSIZE2, QuantTableIdx,
+    QuantTableIdx, AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, DCTSIZE, DCTSIZE2, DC_LUMINANCE_BITS,
+    DC_LUMINANCE_VALUES,
 };
 use mozjpeg_rs::dct;
 use mozjpeg_rs::entropy::EntropyEncoder;
@@ -51,32 +51,45 @@ fn load_real_image(path: &Path) -> (Vec<u8>, usize, usize) {
 
     let y_plane: Vec<u8> = match info.color_type {
         ColorType::Grayscale | ColorType::GrayscaleAlpha => {
-            let step = if info.color_type == ColorType::GrayscaleAlpha { 2 } else { 1 };
+            let step = if info.color_type == ColorType::GrayscaleAlpha {
+                2
+            } else {
+                1
+            };
             buf.iter().step_by(step).copied().collect()
         }
-        ColorType::Rgb => {
-            buf.chunks_exact(3)
-                .map(|rgb| {
-                    let y = (19595 * rgb[0] as u32 + 38470 * rgb[1] as u32 + 7471 * rgb[2] as u32 + 32768) >> 16;
-                    y.min(255) as u8
-                })
-                .collect()
-        }
-        ColorType::Rgba => {
-            buf.chunks_exact(4)
-                .map(|rgba| {
-                    let y = (19595 * rgba[0] as u32 + 38470 * rgba[1] as u32 + 7471 * rgba[2] as u32 + 32768) >> 16;
-                    y.min(255) as u8
-                })
-                .collect()
-        }
+        ColorType::Rgb => buf
+            .chunks_exact(3)
+            .map(|rgb| {
+                let y =
+                    (19595 * rgb[0] as u32 + 38470 * rgb[1] as u32 + 7471 * rgb[2] as u32 + 32768)
+                        >> 16;
+                y.min(255) as u8
+            })
+            .collect(),
+        ColorType::Rgba => buf
+            .chunks_exact(4)
+            .map(|rgba| {
+                let y = (19595 * rgba[0] as u32
+                    + 38470 * rgba[1] as u32
+                    + 7471 * rgba[2] as u32
+                    + 32768)
+                    >> 16;
+                y.min(255) as u8
+            })
+            .collect(),
         _ => panic!("Unsupported color type: {:?}", info.color_type),
     };
 
     (y_plane, width, height)
 }
 
-fn generate_blocks(y_plane: &[u8], width: usize, height: usize, quality: u8) -> Vec<[i16; DCTSIZE2]> {
+fn generate_blocks(
+    y_plane: &[u8],
+    width: usize,
+    height: usize,
+    quality: u8,
+) -> Vec<[i16; DCTSIZE2]> {
     let (luma_qtable, _) = quant::create_quant_tables(quality, QuantTableIdx::ImageMagick, true);
 
     let mcu_width = (width + 7) / 8 * 8;
@@ -116,13 +129,20 @@ fn generate_blocks(y_plane: &[u8], width: usize, height: usize, quality: u8) -> 
     blocks
 }
 
-fn run_standard(blocks: &[[i16; DCTSIZE2]], dc_table: &DerivedTable, ac_table: &DerivedTable, iterations: usize) {
+fn run_standard(
+    blocks: &[[i16; DCTSIZE2]],
+    dc_table: &DerivedTable,
+    ac_table: &DerivedTable,
+    iterations: usize,
+) {
     for _ in 0..iterations {
         let mut writer = VecBitWriter::new_vec();
         {
             let mut encoder = EntropyEncoder::new(&mut writer);
             for block in blocks {
-                encoder.encode_block(black_box(block), 0, dc_table, ac_table).unwrap();
+                encoder
+                    .encode_block(black_box(block), 0, dc_table, ac_table)
+                    .unwrap();
             }
             encoder.flush().unwrap();
         }
@@ -130,7 +150,12 @@ fn run_standard(blocks: &[[i16; DCTSIZE2]], dc_table: &DerivedTable, ac_table: &
     }
 }
 
-fn run_fast(blocks: &[[i16; DCTSIZE2]], dc_table: &DerivedTable, ac_table: &DerivedTable, iterations: usize) {
+fn run_fast(
+    blocks: &[[i16; DCTSIZE2]],
+    dc_table: &DerivedTable,
+    ac_table: &DerivedTable,
+    iterations: usize,
+) {
     for _ in 0..iterations {
         let mut encoder = FastEntropyEncoder::new();
         for block in blocks {

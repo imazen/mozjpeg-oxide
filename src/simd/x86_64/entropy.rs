@@ -280,7 +280,12 @@ impl SimdEntropyEncoder {
     /// through all 63 AC positions, we use trailing_zeros to jump to the
     /// next non-zero coefficient.
     #[inline]
-    fn encode_ac_tzcnt(&mut self, temp: &[i16; DCTSIZE2], nonzero_mask: u64, ac_table: &DerivedTable) {
+    fn encode_ac_tzcnt(
+        &mut self,
+        temp: &[i16; DCTSIZE2],
+        nonzero_mask: u64,
+        ac_table: &DerivedTable,
+    ) {
         // Clear DC bit (bit 0), keep only AC bits (1-63)
         let mut index = nonzero_mask & !1u64;
 
@@ -390,7 +395,8 @@ impl SimdEntropyEncoder {
         let buffer = self.put_buffer.to_be_bytes();
 
         // Check for 0xFF bytes using SWAR
-        let has_ff = self.put_buffer & 0x8080808080808080
+        let has_ff = self.put_buffer
+            & 0x8080808080808080
             & !(self.put_buffer.wrapping_add(0x0101010101010101))
             != 0;
 
@@ -485,7 +491,11 @@ mod tests {
     fn test_nbits_table() {
         // Verify the lookup table matches the formula
         for i in 0u16..=65535 {
-            let expected = if i == 0 { 0 } else { 16 - i.leading_zeros() as u8 };
+            let expected = if i == 0 {
+                0
+            } else {
+                16 - i.leading_zeros() as u8
+            };
             assert_eq!(
                 NBITS_TABLE[i as usize], expected,
                 "Mismatch at i={}: table={}, expected={}",
@@ -530,9 +540,9 @@ mod tests {
 
         // Test sign handling: negative values should be adjusted
         let mut block = [0i16; 64];
-        block[0] = 5;   // natural pos 0 = zigzag pos 0
-        block[1] = -5;  // natural pos 1 = zigzag pos 1
-        block[8] = -1;  // natural pos 8 = zigzag pos 2
+        block[0] = 5; // natural pos 0 = zigzag pos 0
+        block[1] = -5; // natural pos 1 = zigzag pos 1
+        block[8] = -1; // natural pos 8 = zigzag pos 2
 
         let encoder = SimdEntropyEncoder::new();
         let mut temp = [0i16; 64];
@@ -560,7 +570,9 @@ mod tests {
 
     #[test]
     fn test_encode_produces_valid_output() {
-        use crate::consts::{DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES, AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES};
+        use crate::consts::{
+            AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES,
+        };
         use crate::huffman::HuffTable;
 
         if !is_x86_feature_detected!("sse2") {
@@ -584,9 +596,9 @@ mod tests {
 
         // Test with a simple block
         let mut block = [0i16; 64];
-        block[0] = 100;  // DC coefficient
-        block[1] = 10;   // AC at natural pos 1 (zigzag pos 1)
-        block[8] = -5;   // AC at natural pos 8 (zigzag pos 2)
+        block[0] = 100; // DC coefficient
+        block[1] = 10; // AC at natural pos 1 (zigzag pos 1)
+        block[8] = -5; // AC at natural pos 8 (zigzag pos 2)
 
         let mut encoder = SimdEntropyEncoder::new();
         unsafe {
@@ -602,7 +614,9 @@ mod tests {
     #[test]
     fn test_compare_with_standard_encoder() {
         use crate::bitstream::VecBitWriter;
-        use crate::consts::{DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES, AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES};
+        use crate::consts::{
+            AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES,
+        };
         use crate::entropy::EntropyEncoder;
         use crate::huffman::HuffTable;
 
@@ -646,7 +660,7 @@ mod tests {
             {
                 let mut b = [0i16; 64];
                 b[0] = 100;
-                b[63] = 1;  // Last coefficient
+                b[63] = 1; // Last coefficient
                 b
             },
         ];
@@ -656,7 +670,9 @@ mod tests {
             let mut writer = VecBitWriter::new_vec();
             {
                 let mut std_encoder = EntropyEncoder::new(&mut writer);
-                std_encoder.encode_block(block, 0, &dc_table, &ac_table).unwrap();
+                std_encoder
+                    .encode_block(block, 0, &dc_table, &ac_table)
+                    .unwrap();
                 std_encoder.flush().unwrap();
             }
             let std_output = writer.into_bytes();

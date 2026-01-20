@@ -244,12 +244,15 @@ unsafe fn dct_1d_pass_avx2(data: &mut [__m256i; 8], pass1: bool) {
     data[7] = out7;
 }
 
-/// AVX2-optimized forward DCT on 8x8 block.
+/// AVX2-optimized forward DCT on 8x8 block using i32 arithmetic internally.
 ///
 /// # Safety
 /// Requires AVX2 support. Use `is_x86_feature_detected!("avx2")` before calling.
 #[target_feature(enable = "avx2")]
-pub unsafe fn forward_dct_8x8_avx2(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
+pub unsafe fn forward_dct_8x8_i32_avx2_unsafe(
+    samples: &[i16; DCTSIZE2],
+    coeffs: &mut [i16; DCTSIZE2],
+) {
     let mut rows: [__m256i; 8] = [
         load_i16_to_i32(samples.as_ptr().add(0)),
         load_i16_to_i32(samples.as_ptr().add(8)),
@@ -300,10 +303,14 @@ pub unsafe fn forward_dct_8x8_avx2(samples: &[i16; DCTSIZE2], coeffs: &mut [i16;
     );
 }
 
-/// Safe wrapper for forward DCT that can be used as a function pointer.
-pub fn forward_dct_8x8(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
+/// Safe wrapper for AVX2 forward DCT using i32 intrinsics.
+/// Can be used as a function pointer.
+pub fn forward_dct_8x8_i32_avx2_intrinsics(
+    samples: &[i16; DCTSIZE2],
+    coeffs: &mut [i16; DCTSIZE2],
+) {
     // SAFETY: This module is only compiled when target_feature = "avx2"
-    unsafe { forward_dct_8x8_avx2(samples, coeffs) }
+    unsafe { forward_dct_8x8_i32_avx2_unsafe(samples, coeffs) }
 }
 
 // ============================================================================
@@ -504,7 +511,7 @@ mod tests {
             let mut coeffs_avx2 = [0i16; DCTSIZE2];
 
             scalar::forward_dct_8x8(&samples, &mut coeffs_scalar);
-            forward_dct_8x8(&samples, &mut coeffs_avx2);
+            forward_dct_8x8_i32_avx2_intrinsics(&samples, &mut coeffs_avx2);
 
             assert_eq!(
                 coeffs_scalar, coeffs_avx2,

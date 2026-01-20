@@ -46,9 +46,9 @@ use crate::quant::{create_quant_tables, quantize_block_raw};
 use crate::sample;
 use crate::scan_optimize::{generate_search_scans, ScanSearchConfig, ScanSelector};
 use crate::scan_trial::ScanTrialEncoder;
-use crate::simd::SimdOps;
 #[cfg(target_arch = "x86_64")]
 use crate::simd::x86_64::entropy::SimdEntropyEncoder;
+use crate::simd::SimdOps;
 use crate::trellis::trellis_quantize_block;
 use crate::types::{Limits, PixelDensity, Preset, Subsampling, TrellisConfig};
 
@@ -2865,13 +2865,28 @@ impl Encoder {
 
                         // Y blocks
                         for _ in 0..blocks_per_mcu_y {
-                            entropy.encode_block(&y_blocks[y_idx], 0, &opt_dc_luma, &opt_ac_luma)?;
+                            entropy.encode_block(
+                                &y_blocks[y_idx],
+                                0,
+                                &opt_dc_luma,
+                                &opt_ac_luma,
+                            )?;
                             y_idx += 1;
                         }
                         // Cb block
-                        entropy.encode_block(&cb_blocks[c_idx], 1, &opt_dc_chroma, &opt_ac_chroma)?;
+                        entropy.encode_block(
+                            &cb_blocks[c_idx],
+                            1,
+                            &opt_dc_chroma,
+                            &opt_ac_chroma,
+                        )?;
                         // Cr block
-                        entropy.encode_block(&cr_blocks[c_idx], 2, &opt_dc_chroma, &opt_ac_chroma)?;
+                        entropy.encode_block(
+                            &cr_blocks[c_idx],
+                            2,
+                            &opt_dc_chroma,
+                            &opt_ac_chroma,
+                        )?;
                         c_idx += 1;
                         mcu_count += 1;
                     }

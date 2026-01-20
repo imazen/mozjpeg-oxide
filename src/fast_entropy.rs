@@ -362,7 +362,8 @@ impl FastEntropyEncoder {
 
         if dc_nbits > 0 {
             let dc_extra = additional_bits(dc_diff, dc_nbits);
-            self.writer.write_code_and_extra(dc_code, dc_len, dc_extra, dc_nbits);
+            self.writer
+                .write_code_and_extra(dc_code, dc_len, dc_extra, dc_nbits);
         } else {
             self.writer.write_bits(dc_code, dc_len);
         }
@@ -481,7 +482,8 @@ impl FastEntropyEncoder {
     /// Emits a restart marker and resets DC prediction.
     pub fn emit_restart(&mut self, restart_num: u8) {
         self.writer.flush();
-        self.writer.write_bytes_raw(&[0xFF, 0xD0 + (restart_num & 0x07)]);
+        self.writer
+            .write_bytes_raw(&[0xFF, 0xD0 + (restart_num & 0x07)]);
         self.reset_dc();
     }
 
@@ -627,7 +629,9 @@ mod tests {
         let mut std_writer = VecBitWriter::new_vec();
         {
             let mut std_encoder = EntropyEncoder::new(&mut std_writer);
-            std_encoder.encode_block(&block, 0, &dc_table, &ac_table).unwrap();
+            std_encoder
+                .encode_block(&block, 0, &dc_table, &ac_table)
+                .unwrap();
             std_encoder.flush().unwrap();
         }
         let std_bytes = std_writer.into_bytes();
@@ -637,7 +641,10 @@ mod tests {
         fast_encoder.encode_block(&block, 0, &dc_table, &ac_table);
         let fast_bytes = fast_encoder.into_bytes();
 
-        assert_eq!(std_bytes, fast_bytes, "Fast encoder should produce identical output");
+        assert_eq!(
+            std_bytes, fast_bytes,
+            "Fast encoder should produce identical output"
+        );
     }
 
     #[test]

@@ -8,8 +8,9 @@
 
 use multiversion::multiversion;
 
-// Re-export the canonical DCT implementation (now with multiversion)
-pub use crate::dct::forward_dct_8x8;
+// Re-export the canonical DCT implementation (multiversion autovectorization)
+// Aliased as forward_dct_8x8 for SimdOps dispatch compatibility
+pub use crate::dct::forward_dct_8x8_i32_multiversion as forward_dct_8x8;
 
 // ============================================================================
 // Color Conversion

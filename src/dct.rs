@@ -11,7 +11,7 @@
 //!
 //! # SIMD Optimization
 //!
-//! The `forward_dct_8x8_simd` function uses the "row-parallel" approach:
+//! The `forward_dct_8x8_i32_wide_gather` function uses the "row-parallel" approach:
 //! process 4 rows simultaneously using `wide::i32x4`. Each lane of the
 //! SIMD vector handles a different row.
 //!
@@ -69,7 +69,7 @@ fn descale(x: i32, n: i32) -> i32 {
     "x86+sse4.1",
     "aarch64+neon",
 ))]
-pub fn forward_dct_8x8(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
+pub fn forward_dct_8x8_i32_multiversion(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
     // Work buffer (we modify in place across both passes)
     let mut data = [0i32; DCTSIZE2];
 
@@ -301,7 +301,7 @@ fn dct_1d_simd(
     note = "Not used by encoder. Use forward_dct_8x8 (with multiversion autovectorization) \
             or enable simd-intrinsics feature for hand-written AVX2."
 )]
-pub fn forward_dct_8x8_simd(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
+pub fn forward_dct_8x8_i32_wide_gather(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
     // Work buffer - aligned to 64 bytes for potential future SIMD improvements
     let mut data = [0i32; DCTSIZE2];
 
@@ -719,7 +719,7 @@ fn transpose_8x8(rows: &mut [i32x8; 8]) {
 /// To do row-wise processing, we transpose first so that rows become columns.
 ///
 /// The contiguous loads should be faster than the gather-based approach.
-pub fn forward_dct_8x8_transpose(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
+pub fn forward_dct_8x8_i32_wide_transpose(samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
     // Load all 8 rows contiguously - this is the key optimization!
     // Each row is 8 contiguous i16 values converted to i32
     let mut data: [i32x8; 8] = [
@@ -892,7 +892,7 @@ pub fn level_shift(samples: &[u8; DCTSIZE2], output: &mut [i16; DCTSIZE2]) {
             via SimdOps dispatch. This function exists for standalone/testing use."
 )]
 #[allow(deprecated)]
-pub fn forward_dct(samples: &[u8; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
+pub fn forward_dct_u8_i32_multiversion(samples: &[u8; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
     let mut shifted = [0i16; DCTSIZE2];
     level_shift(samples, &mut shifted);
 
@@ -901,11 +901,11 @@ pub fn forward_dct(samples: &[u8; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
         use archmage::tokens::x86::Avx2Token;
         use archmage::SimdToken;
         if let Some(token) = Avx2Token::try_new() {
-            return avx2::forward_dct_8x8_avx2(token, &shifted, coeffs);
+            return avx2_archmage::forward_dct_8x8_i32(token, &shifted, coeffs);
         }
     }
 
-    forward_dct_8x8_transpose(&shifted, coeffs);
+    forward_dct_8x8_i32_wide_transpose(&shifted, coeffs);
 }
 
 /// Combined level-shift, overshoot deringing, and forward DCT.
@@ -930,7 +930,7 @@ pub fn forward_dct(samples: &[u8; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
             standalone/testing use."
 )]
 #[allow(deprecated)]
-pub fn forward_dct_with_deringing(
+pub fn forward_dct_u8_i32_multiversion_deringing(
     samples: &[u8; DCTSIZE2],
     coeffs: &mut [i16; DCTSIZE2],
     dc_quant: u16,
@@ -946,11 +946,11 @@ pub fn forward_dct_with_deringing(
         use archmage::tokens::x86::Avx2Token;
         use archmage::SimdToken;
         if let Some(token) = Avx2Token::try_new() {
-            return avx2::forward_dct_8x8_avx2(token, &shifted, coeffs);
+            return avx2_archmage::forward_dct_8x8_i32(token, &shifted, coeffs);
         }
     }
 
-    forward_dct_8x8_transpose(&shifted, coeffs);
+    forward_dct_8x8_i32_wide_transpose(&shifted, coeffs);
 }
 
 // ============================================================================
@@ -972,8 +972,8 @@ pub fn forward_dct_with_deringing(
     note = "Not used by encoder. This archmage-based module exists for experimentation. \
             The encoder uses src/simd/x86_64/avx2.rs via SimdOps dispatch."
 )]
-pub mod avx2 {
-    //! AVX2 SIMD implementation of forward DCT (DEPRECATED).
+pub mod avx2_archmage {
+    //! AVX2 SIMD implementation of forward DCT using archmage (DEPRECATED).
     //!
     //! This module uses archmage for safe SIMD operations with capability tokens.
     //! The `#[arcane]` macro enables safe use of value-based intrinsics.
@@ -984,8 +984,8 @@ pub mod avx2 {
 
     use super::*;
     use archmage::arcane;
-    use archmage::tokens::x86::Avx2Token;
     use archmage::mem::{avx, sse2};
+    use archmage::tokens::x86::Avx2Token;
     use core::arch::x86_64::*;
 
     /// Load 8 contiguous i16 values and sign-extend to 8 i32 values in a ymm register.
@@ -1042,7 +1042,11 @@ pub mod avx2 {
     ///
     /// The token proves AVX2 is available. Memory operations use safe archmage wrappers.
     #[arcane]
-    pub fn forward_dct_8x8_avx2(token: Avx2Token, samples: &[i16; DCTSIZE2], coeffs: &mut [i16; DCTSIZE2]) {
+    pub fn forward_dct_8x8_i32(
+        token: Avx2Token,
+        samples: &[i16; DCTSIZE2],
+        coeffs: &mut [i16; DCTSIZE2],
+    ) {
         // Helper to get a row reference
         #[inline(always)]
         fn row(samples: &[i16; DCTSIZE2], idx: usize) -> &[i16; 8] {
@@ -1083,14 +1087,46 @@ pub mod avx2 {
             (&mut coeffs[idx * 8..][..8]).try_into().unwrap()
         }
 
-        sse2::_mm_storeu_si128(sse2_token, row_mut(coeffs, 0), pack_i32_to_i16(token, rows[0]));
-        sse2::_mm_storeu_si128(sse2_token, row_mut(coeffs, 1), pack_i32_to_i16(token, rows[1]));
-        sse2::_mm_storeu_si128(sse2_token, row_mut(coeffs, 2), pack_i32_to_i16(token, rows[2]));
-        sse2::_mm_storeu_si128(sse2_token, row_mut(coeffs, 3), pack_i32_to_i16(token, rows[3]));
-        sse2::_mm_storeu_si128(sse2_token, row_mut(coeffs, 4), pack_i32_to_i16(token, rows[4]));
-        sse2::_mm_storeu_si128(sse2_token, row_mut(coeffs, 5), pack_i32_to_i16(token, rows[5]));
-        sse2::_mm_storeu_si128(sse2_token, row_mut(coeffs, 6), pack_i32_to_i16(token, rows[6]));
-        sse2::_mm_storeu_si128(sse2_token, row_mut(coeffs, 7), pack_i32_to_i16(token, rows[7]));
+        sse2::_mm_storeu_si128(
+            sse2_token,
+            row_mut(coeffs, 0),
+            pack_i32_to_i16(token, rows[0]),
+        );
+        sse2::_mm_storeu_si128(
+            sse2_token,
+            row_mut(coeffs, 1),
+            pack_i32_to_i16(token, rows[1]),
+        );
+        sse2::_mm_storeu_si128(
+            sse2_token,
+            row_mut(coeffs, 2),
+            pack_i32_to_i16(token, rows[2]),
+        );
+        sse2::_mm_storeu_si128(
+            sse2_token,
+            row_mut(coeffs, 3),
+            pack_i32_to_i16(token, rows[3]),
+        );
+        sse2::_mm_storeu_si128(
+            sse2_token,
+            row_mut(coeffs, 4),
+            pack_i32_to_i16(token, rows[4]),
+        );
+        sse2::_mm_storeu_si128(
+            sse2_token,
+            row_mut(coeffs, 5),
+            pack_i32_to_i16(token, rows[5]),
+        );
+        sse2::_mm_storeu_si128(
+            sse2_token,
+            row_mut(coeffs, 6),
+            pack_i32_to_i16(token, rows[6]),
+        );
+        sse2::_mm_storeu_si128(
+            sse2_token,
+            row_mut(coeffs, 7),
+            pack_i32_to_i16(token, rows[7]),
+        );
     }
 
     /// Transpose 8x8 matrix of i32 values stored in 8 ymm registers.
@@ -1180,25 +1216,25 @@ pub mod avx2 {
         let z1 = _mm256_mullo_epi32(_mm256_add_epi32(tmp12, tmp13), fix_0_541196100);
         let (out2, out6) = if pass1 {
             (
-                descale_pass1(token, _mm256_add_epi32(
-                    z1,
-                    _mm256_mullo_epi32(tmp13, fix_0_765366865),
-                )),
-                descale_pass1(token, _mm256_sub_epi32(
-                    z1,
-                    _mm256_mullo_epi32(tmp12, fix_1_847759065),
-                )),
+                descale_pass1(
+                    token,
+                    _mm256_add_epi32(z1, _mm256_mullo_epi32(tmp13, fix_0_765366865)),
+                ),
+                descale_pass1(
+                    token,
+                    _mm256_sub_epi32(z1, _mm256_mullo_epi32(tmp12, fix_1_847759065)),
+                ),
             )
         } else {
             (
-                descale_pass2(token, _mm256_add_epi32(
-                    z1,
-                    _mm256_mullo_epi32(tmp13, fix_0_765366865),
-                )),
-                descale_pass2(token, _mm256_sub_epi32(
-                    z1,
-                    _mm256_mullo_epi32(tmp12, fix_1_847759065),
-                )),
+                descale_pass2(
+                    token,
+                    _mm256_add_epi32(z1, _mm256_mullo_epi32(tmp13, fix_0_765366865)),
+                ),
+                descale_pass2(
+                    token,
+                    _mm256_sub_epi32(z1, _mm256_mullo_epi32(tmp12, fix_1_847759065)),
+                ),
             )
         };
 
@@ -1287,7 +1323,7 @@ pub mod avx2 {
     ///
     /// The token proves AVX2 is available. Memory operations use safe archmage wrappers.
     #[arcane]
-    pub fn forward_dct_8x8_avx2_i16(
+    pub fn forward_dct_8x8_i16(
         token: Avx2Token,
         samples: &[i16; DCTSIZE2],
         coeffs: &mut [i16; DCTSIZE2],
@@ -1638,7 +1674,7 @@ mod tests {
         }
 
         let mut coeffs = [0i16; DCTSIZE2];
-        forward_dct_8x8(&samples, &mut coeffs);
+        forward_dct_8x8_i32_multiversion(&samples, &mut coeffs);
 
         // DC should be 8 * 8 * value = 64 * value = 6400
         // (Factor of 8 from row pass and factor of 8 from column pass)
@@ -1662,7 +1698,7 @@ mod tests {
     fn test_zero_block() {
         let samples = [0i16; DCTSIZE2];
         let mut coeffs = [0i16; DCTSIZE2];
-        forward_dct_8x8(&samples, &mut coeffs);
+        forward_dct_8x8_i32_multiversion(&samples, &mut coeffs);
 
         // All coefficients should be 0
         for i in 0..DCTSIZE2 {
@@ -1686,7 +1722,7 @@ mod tests {
         }
 
         let mut coeffs = [0i16; DCTSIZE2];
-        forward_dct_8x8(&samples, &mut coeffs);
+        forward_dct_8x8_i32_multiversion(&samples, &mut coeffs);
 
         // DC should be 0 (equal positive and negative)
         assert!(coeffs[0].abs() <= 1, "DC should be ~0 for balanced pattern");
@@ -1716,7 +1752,7 @@ mod tests {
         }
 
         let mut coeffs = [0i16; DCTSIZE2];
-        forward_dct_8x8(&samples, &mut coeffs);
+        forward_dct_8x8_i32_multiversion(&samples, &mut coeffs);
 
         // The horizontal gradient should produce significant energy at position [0][1]
         // (first horizontal AC coefficient)
@@ -1749,8 +1785,8 @@ mod tests {
         let mut coeffs_scalar = [0i16; DCTSIZE2];
         let mut coeffs_simd = [0i16; DCTSIZE2];
 
-        forward_dct_8x8(&samples, &mut coeffs_scalar);
-        forward_dct_8x8_simd(&samples, &mut coeffs_simd);
+        forward_dct_8x8_i32_multiversion(&samples, &mut coeffs_scalar);
+        forward_dct_8x8_i32_wide_gather(&samples, &mut coeffs_simd);
 
         assert_eq!(
             coeffs_scalar, coeffs_simd,
@@ -1772,8 +1808,8 @@ mod tests {
         let mut coeffs_scalar = [0i16; DCTSIZE2];
         let mut coeffs_simd = [0i16; DCTSIZE2];
 
-        forward_dct_8x8(&samples, &mut coeffs_scalar);
-        forward_dct_8x8_simd(&samples, &mut coeffs_simd);
+        forward_dct_8x8_i32_multiversion(&samples, &mut coeffs_scalar);
+        forward_dct_8x8_i32_wide_gather(&samples, &mut coeffs_simd);
 
         assert_eq!(
             coeffs_scalar, coeffs_simd,
@@ -1794,8 +1830,8 @@ mod tests {
         let mut coeffs_scalar = [0i16; DCTSIZE2];
         let mut coeffs_simd = [0i16; DCTSIZE2];
 
-        forward_dct_8x8(&samples, &mut coeffs_scalar);
-        forward_dct_8x8_simd(&samples, &mut coeffs_simd);
+        forward_dct_8x8_i32_multiversion(&samples, &mut coeffs_scalar);
+        forward_dct_8x8_i32_wide_gather(&samples, &mut coeffs_simd);
 
         assert_eq!(
             coeffs_scalar, coeffs_simd,
@@ -1816,8 +1852,8 @@ mod tests {
             let mut coeffs_scalar = [0i16; DCTSIZE2];
             let mut coeffs_simd = [0i16; DCTSIZE2];
 
-            forward_dct_8x8(&samples, &mut coeffs_scalar);
-            forward_dct_8x8_simd(&samples, &mut coeffs_simd);
+            forward_dct_8x8_i32_multiversion(&samples, &mut coeffs_scalar);
+            forward_dct_8x8_i32_wide_gather(&samples, &mut coeffs_simd);
 
             assert_eq!(
                 coeffs_scalar, coeffs_simd,
@@ -1834,8 +1870,8 @@ mod tests {
         let mut coeffs_scalar = [0i16; DCTSIZE2];
         let mut coeffs_transpose = [0i16; DCTSIZE2];
 
-        forward_dct_8x8(&samples, &mut coeffs_scalar);
-        forward_dct_8x8_transpose(&samples, &mut coeffs_transpose);
+        forward_dct_8x8_i32_multiversion(&samples, &mut coeffs_scalar);
+        forward_dct_8x8_i32_wide_transpose(&samples, &mut coeffs_transpose);
 
         assert_eq!(
             coeffs_scalar, coeffs_transpose,
@@ -1856,8 +1892,8 @@ mod tests {
         let mut coeffs_scalar = [0i16; DCTSIZE2];
         let mut coeffs_transpose = [0i16; DCTSIZE2];
 
-        forward_dct_8x8(&samples, &mut coeffs_scalar);
-        forward_dct_8x8_transpose(&samples, &mut coeffs_transpose);
+        forward_dct_8x8_i32_multiversion(&samples, &mut coeffs_scalar);
+        forward_dct_8x8_i32_wide_transpose(&samples, &mut coeffs_transpose);
 
         assert_eq!(
             coeffs_scalar, coeffs_transpose,
@@ -1877,8 +1913,8 @@ mod tests {
         let mut coeffs_scalar = [0i16; DCTSIZE2];
         let mut coeffs_transpose = [0i16; DCTSIZE2];
 
-        forward_dct_8x8(&samples, &mut coeffs_scalar);
-        forward_dct_8x8_transpose(&samples, &mut coeffs_transpose);
+        forward_dct_8x8_i32_multiversion(&samples, &mut coeffs_scalar);
+        forward_dct_8x8_i32_wide_transpose(&samples, &mut coeffs_transpose);
 
         assert_eq!(
             coeffs_scalar, coeffs_transpose,
@@ -1898,8 +1934,8 @@ mod tests {
             let mut coeffs_scalar = [0i16; DCTSIZE2];
             let mut coeffs_transpose = [0i16; DCTSIZE2];
 
-            forward_dct_8x8(&samples, &mut coeffs_scalar);
-            forward_dct_8x8_transpose(&samples, &mut coeffs_transpose);
+            forward_dct_8x8_i32_multiversion(&samples, &mut coeffs_scalar);
+            forward_dct_8x8_i32_wide_transpose(&samples, &mut coeffs_transpose);
 
             assert_eq!(
                 coeffs_scalar, coeffs_transpose,
@@ -1929,7 +1965,7 @@ mod tests {
             let mut coeffs_scalar = [0i16; DCTSIZE2];
             let mut coeffs_avx2 = [0i16; DCTSIZE2];
 
-            forward_dct_8x8(&samples, &mut coeffs_scalar);
+            forward_dct_8x8_i32_multiversion(&samples, &mut coeffs_scalar);
             forward_dct_8x8_avx2(token, &samples, &mut coeffs_avx2);
 
             assert_eq!(
@@ -1960,7 +1996,7 @@ mod tests {
             let mut coeffs_scalar = [0i16; DCTSIZE2];
             let mut coeffs_avx2_i16 = [0i16; DCTSIZE2];
 
-            forward_dct_8x8(&samples, &mut coeffs_scalar);
+            forward_dct_8x8_i32_multiversion(&samples, &mut coeffs_scalar);
             forward_dct_8x8_avx2_i16(token, &samples, &mut coeffs_avx2_i16);
 
             // Allow small differences due to 16-bit vs 32-bit intermediate precision

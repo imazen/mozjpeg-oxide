@@ -4,7 +4,7 @@
 
 fn main() {
     const DCTSIZE2: usize = 64;
-    
+
     // Generate test data
     let mut samples = [0i16; DCTSIZE2];
     let mut seed = 12345u32;
@@ -17,15 +17,18 @@ fn main() {
 
     // New implementation (dct.rs with archmage)
     let mut coeffs_new = [0i16; DCTSIZE2];
-    
+
     #[cfg(target_arch = "x86_64")]
     {
-        use archmage::SimdToken;
         use archmage::tokens::x86::Avx2Token;
-        
+        use archmage::SimdToken;
+
         if let Some(token) = Avx2Token::try_new() {
-            mozjpeg_rs::dct::avx2::forward_dct_8x8_avx2(token, &samples, &mut coeffs_new);
-            println!("\nNew (archmage) DCT output (first 8): {:?}", &coeffs_new[..8]);
+            mozjpeg_rs::dct::avx2_archmage::forward_dct_8x8_i32(token, &samples, &mut coeffs_new);
+            println!(
+                "\nNew (archmage) DCT output (first 8): {:?}",
+                &coeffs_new[..8]
+            );
         } else {
             println!("AVX2 not available");
             return;
@@ -36,9 +39,15 @@ fn main() {
     #[cfg(all(target_arch = "x86_64", feature = "simd-intrinsics"))]
     {
         let mut coeffs_old = [0i16; DCTSIZE2];
-        mozjpeg_rs::simd::x86_64::avx2::forward_dct_8x8(&samples, &mut coeffs_old);
-        println!("Old (simd module) DCT output (first 8): {:?}", &coeffs_old[..8]);
-        
+        mozjpeg_rs::simd::x86_64::avx2::forward_dct_8x8_i32_avx2_intrinsics(
+            &samples,
+            &mut coeffs_old,
+        );
+        println!(
+            "Old (simd module) DCT output (first 8): {:?}",
+            &coeffs_old[..8]
+        );
+
         // Compare
         let mut max_diff = 0i16;
         let mut diff_count = 0;
@@ -51,14 +60,14 @@ fn main() {
                 }
             }
         }
-        
+
         if diff_count == 0 {
             println!("\n✓ Outputs are IDENTICAL");
         } else {
             println!("\n✗ {} differences, max diff: {}", diff_count, max_diff);
         }
     }
-    
+
     #[cfg(not(feature = "simd-intrinsics"))]
     {
         println!("\nNote: simd-intrinsics feature not enabled, can't compare with old impl");

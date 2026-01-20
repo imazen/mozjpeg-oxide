@@ -3,11 +3,13 @@
 //! Compares standard vs fast entropy encoder implementations with REAL image data.
 //! Uses actual PNG images through DCT+quantization to match real-world coefficient distributions.
 
+#![allow(deprecated)] // Using deprecated wide-based DCT for benchmark consistency
+
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use mozjpeg_rs::bitstream::VecBitWriter;
 use mozjpeg_rs::consts::{
-    AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES, DCTSIZE,
-    DCTSIZE2, QuantTableIdx,
+    QuantTableIdx, AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, DCTSIZE, DCTSIZE2, DC_LUMINANCE_BITS,
+    DC_LUMINANCE_VALUES,
 };
 use mozjpeg_rs::dct;
 use mozjpeg_rs::entropy::EntropyEncoder;
@@ -54,26 +56,37 @@ fn load_real_image(path: &Path) -> (Vec<u8>, usize, usize) {
     // Convert to Y (grayscale) using standard coefficients
     let y_plane: Vec<u8> = match info.color_type {
         ColorType::Grayscale | ColorType::GrayscaleAlpha => {
-            let step = if info.color_type == ColorType::GrayscaleAlpha { 2 } else { 1 };
+            let step = if info.color_type == ColorType::GrayscaleAlpha {
+                2
+            } else {
+                1
+            };
             buf.iter().step_by(step).copied().collect()
         }
         ColorType::Rgb => {
             buf.chunks_exact(3)
                 .map(|rgb| {
                     // Y = 0.299*R + 0.587*G + 0.114*B (scaled integer math)
-                    let y = (19595 * rgb[0] as u32 + 38470 * rgb[1] as u32 + 7471 * rgb[2] as u32 + 32768) >> 16;
+                    let y = (19595 * rgb[0] as u32
+                        + 38470 * rgb[1] as u32
+                        + 7471 * rgb[2] as u32
+                        + 32768)
+                        >> 16;
                     y.min(255) as u8
                 })
                 .collect()
         }
-        ColorType::Rgba => {
-            buf.chunks_exact(4)
-                .map(|rgba| {
-                    let y = (19595 * rgba[0] as u32 + 38470 * rgba[1] as u32 + 7471 * rgba[2] as u32 + 32768) >> 16;
-                    y.min(255) as u8
-                })
-                .collect()
-        }
+        ColorType::Rgba => buf
+            .chunks_exact(4)
+            .map(|rgba| {
+                let y = (19595 * rgba[0] as u32
+                    + 38470 * rgba[1] as u32
+                    + 7471 * rgba[2] as u32
+                    + 32768)
+                    >> 16;
+                y.min(255) as u8
+            })
+            .collect(),
         _ => panic!("Unsupported color type: {:?}", info.color_type),
     };
 
@@ -94,7 +107,12 @@ fn create_test_image(width: usize, height: usize) -> Vec<u8> {
 }
 
 /// Generate DCT+quantized blocks from a Y plane.
-fn generate_blocks_from_y(y_plane: &[u8], width: usize, height: usize, quality: u8) -> Vec<[i16; DCTSIZE2]> {
+fn generate_blocks_from_y(
+    y_plane: &[u8],
+    width: usize,
+    height: usize,
+    quality: u8,
+) -> Vec<[i16; DCTSIZE2]> {
     let (luma_qtable, _) = quant::create_quant_tables(quality, QuantTableIdx::ImageMagick, true);
 
     let mcu_width = (width + 7) / 8 * 8;
@@ -124,7 +142,7 @@ fn generate_blocks_from_y(y_plane: &[u8], width: usize, height: usize, quality: 
             }
 
             // Forward DCT
-            dct::forward_dct_8x8_transpose(&samples, &mut dct_block);
+            dct::forward_dct_8x8_i32_wide_transpose(&samples, &mut dct_block);
 
             // Quantize
             let mut quant_block = [0i16; DCTSIZE2];
@@ -171,7 +189,7 @@ fn generate_realistic_blocks(width: usize, height: usize, quality: u8) -> Vec<[i
             }
 
             // Forward DCT
-            dct::forward_dct_8x8_transpose(&samples, &mut dct_block);
+            dct::forward_dct_8x8_i32_wide_transpose(&samples, &mut dct_block);
 
             // Quantize
             let mut quant_block = [0i16; DCTSIZE2];
@@ -249,39 +267,26 @@ fn entropy_benchmark(c: &mut Criterion) {
 
         real_group.throughput(Throughput::Elements(num_blocks as u64));
 
-        real_group.bench_with_input(
-            BenchmarkId::new("standard", &name),
-            &blocks,
-            |b, blocks| {
-                b.iter(|| bench_standard_encoder(black_box(blocks), &dc_table, &ac_table))
-            },
-        );
+        real_group.bench_with_input(BenchmarkId::new("standard", &name), &blocks, |b, blocks| {
+            b.iter(|| bench_standard_encoder(black_box(blocks), &dc_table, &ac_table))
+        });
 
-        real_group.bench_with_input(
-            BenchmarkId::new("fast", &name),
-            &blocks,
-            |b, blocks| {
-                b.iter(|| bench_fast_encoder(black_box(blocks), &dc_table, &ac_table))
-            },
-        );
+        real_group.bench_with_input(BenchmarkId::new("fast", &name), &blocks, |b, blocks| {
+            b.iter(|| bench_fast_encoder(black_box(blocks), &dc_table, &ac_table))
+        });
 
         #[cfg(target_arch = "x86_64")]
         real_group.bench_with_input(
             BenchmarkId::new("simd_sse2", &name),
             &blocks,
-            |b, blocks| {
-                b.iter(|| bench_simd_encoder(black_box(blocks), &dc_table, &ac_table))
-            },
+            |b, blocks| b.iter(|| bench_simd_encoder(black_box(blocks), &dc_table, &ac_table)),
         );
     }
 
     real_group.finish();
 
     // ===== SYNTHETIC IMAGE BENCHMARK (FOR COMPARISON) =====
-    let configs = [
-        ("Q50_512x512", 512, 512, 50),
-        ("Q85_512x512", 512, 512, 85),
-    ];
+    let configs = [("Q50_512x512", 512, 512, 50), ("Q85_512x512", 512, 512, 85)];
 
     let mut synth_group = c.benchmark_group("entropy_synthetic");
     synth_group.warm_up_time(Duration::from_secs(2));
@@ -294,21 +299,13 @@ fn entropy_benchmark(c: &mut Criterion) {
 
         synth_group.throughput(Throughput::Elements(num_blocks as u64));
 
-        synth_group.bench_with_input(
-            BenchmarkId::new("standard", name),
-            &blocks,
-            |b, blocks| {
-                b.iter(|| bench_standard_encoder(black_box(blocks), &dc_table, &ac_table))
-            },
-        );
+        synth_group.bench_with_input(BenchmarkId::new("standard", name), &blocks, |b, blocks| {
+            b.iter(|| bench_standard_encoder(black_box(blocks), &dc_table, &ac_table))
+        });
 
-        synth_group.bench_with_input(
-            BenchmarkId::new("fast", name),
-            &blocks,
-            |b, blocks| {
-                b.iter(|| bench_fast_encoder(black_box(blocks), &dc_table, &ac_table))
-            },
-        );
+        synth_group.bench_with_input(BenchmarkId::new("fast", name), &blocks, |b, blocks| {
+            b.iter(|| bench_fast_encoder(black_box(blocks), &dc_table, &ac_table))
+        });
     }
 
     synth_group.finish();

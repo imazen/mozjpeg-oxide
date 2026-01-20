@@ -86,8 +86,8 @@ fn bench_dct_combined(c: &mut Criterion) {
 
 #[cfg(target_arch = "x86_64")]
 fn bench_dct_avx2_intrinsics(c: &mut Criterion) {
-    use archmage::SimdToken;
     use archmage::tokens::x86::Avx2Token;
+    use archmage::SimdToken;
     use mozjpeg_rs::dct::avx2::forward_dct_8x8_avx2;
 
     let Some(token) = Avx2Token::try_new() else {
@@ -111,8 +111,8 @@ fn bench_dct_avx2_intrinsics(c: &mut Criterion) {
 
 #[cfg(target_arch = "x86_64")]
 fn bench_dct_avx2_i16(c: &mut Criterion) {
-    use archmage::SimdToken;
     use archmage::tokens::x86::Avx2Token;
+    use archmage::SimdToken;
     use mozjpeg_rs::dct::avx2::forward_dct_8x8_avx2_i16;
 
     let Some(token) = Avx2Token::try_new() else {
@@ -163,8 +163,8 @@ fn bench_dct_batch_1000(c: &mut Criterion) {
 
     #[cfg(target_arch = "x86_64")]
     {
-        use archmage::SimdToken;
         use archmage::tokens::x86::Avx2Token;
+        use archmage::SimdToken;
         use mozjpeg_rs::dct::avx2::{forward_dct_8x8_avx2, forward_dct_8x8_avx2_i16};
 
         if let Some(token) = Avx2Token::try_new() {
@@ -182,7 +182,11 @@ fn bench_dct_batch_1000(c: &mut Criterion) {
                 b.iter(|| {
                     let mut coeffs = [0i16; 64];
                     for _ in 0..1000 {
-                        forward_dct_8x8_avx2_i16(token, black_box(&samples), black_box(&mut coeffs));
+                        forward_dct_8x8_avx2_i16(
+                            token,
+                            black_box(&samples),
+                            black_box(&mut coeffs),
+                        );
                     }
                     coeffs
                 })

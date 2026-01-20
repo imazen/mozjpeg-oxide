@@ -25,14 +25,11 @@ fn load_rgb_image(path: &Path) -> (Vec<u8>, u32, u32) {
 
     let rgb: Vec<u8> = match info.color_type {
         ColorType::Rgb => buf[..width as usize * height as usize * 3].to_vec(),
-        ColorType::Rgba => {
-            buf.chunks_exact(4)
-                .flat_map(|rgba| [rgba[0], rgba[1], rgba[2]])
-                .collect()
-        }
-        ColorType::Grayscale => {
-            buf.iter().flat_map(|&g| [g, g, g]).collect()
-        }
+        ColorType::Rgba => buf
+            .chunks_exact(4)
+            .flat_map(|rgba| [rgba[0], rgba[1], rgba[2]])
+            .collect(),
+        ColorType::Grayscale => buf.iter().flat_map(|&g| [g, g, g]).collect(),
         _ => panic!("Unsupported color type: {:?}", info.color_type),
     };
 
@@ -93,16 +90,29 @@ fn run_c_mozjpeg(rgb: &[u8], width: u32, height: u32, iterations: usize) {
                 cinfo.optimize_coding = false as boolean;
 
                 // Disable trellis quantization
-                jpeg_c_set_bool_param(&mut cinfo, J_BOOLEAN_PARAM::JBOOLEAN_TRELLIS_QUANT, false as boolean);
-                jpeg_c_set_bool_param(&mut cinfo, J_BOOLEAN_PARAM::JBOOLEAN_TRELLIS_QUANT_DC, false as boolean);
-                jpeg_c_set_bool_param(&mut cinfo, J_BOOLEAN_PARAM::JBOOLEAN_OVERSHOOT_DERINGING, false as boolean);
+                jpeg_c_set_bool_param(
+                    &mut cinfo,
+                    J_BOOLEAN_PARAM::JBOOLEAN_TRELLIS_QUANT,
+                    false as boolean,
+                );
+                jpeg_c_set_bool_param(
+                    &mut cinfo,
+                    J_BOOLEAN_PARAM::JBOOLEAN_TRELLIS_QUANT_DC,
+                    false as boolean,
+                );
+                jpeg_c_set_bool_param(
+                    &mut cinfo,
+                    J_BOOLEAN_PARAM::JBOOLEAN_OVERSHOOT_DERINGING,
+                    false as boolean,
+                );
             }
 
             jpeg_start_compress(&mut cinfo, true as boolean);
 
             let row_stride = width as usize * 3;
             while cinfo.next_scanline < cinfo.image_height {
-                let row_ptr = rgb.as_ptr().add(cinfo.next_scanline as usize * row_stride) as *const u8;
+                let row_ptr =
+                    rgb.as_ptr().add(cinfo.next_scanline as usize * row_stride) as *const u8;
                 let row_array: [*const u8; 1] = [row_ptr];
                 jpeg_write_scanlines(&mut cinfo, row_array.as_ptr(), 1);
             }

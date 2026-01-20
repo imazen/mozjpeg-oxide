@@ -110,8 +110,8 @@ impl<W: Write> BitWriter<W> {
             let overflow_bits = (-self.free_bits) as u32;
 
             // Put upper bits into current buffer before flush
-            self.put_buffer = (self.put_buffer << (total_size + self.free_bits))
-                | (combined >> overflow_bits);
+            self.put_buffer =
+                (self.put_buffer << (total_size + self.free_bits)) | (combined >> overflow_bits);
             self.flush_buffer()?;
 
             // Reset buffer with only the overflow (lower) bits

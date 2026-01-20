@@ -4,7 +4,7 @@
 
 use mozjpeg_rs::bitstream::VecBitWriter;
 use mozjpeg_rs::consts::{
-    AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES, DCTSIZE2,
+    AC_LUMINANCE_BITS, AC_LUMINANCE_VALUES, DCTSIZE2, DC_LUMINANCE_BITS, DC_LUMINANCE_VALUES,
 };
 use mozjpeg_rs::entropy::EntropyEncoder;
 use mozjpeg_rs::fast_entropy::FastEntropyEncoder;
@@ -116,9 +116,9 @@ fn main() {
 
     // Test with different block counts and quality levels
     let configs = [
-        ("512x512 Q50", 64 * 64, 0.3),    // 4096 blocks, sparse
-        ("512x512 Q75", 64 * 64, 0.5),    // 4096 blocks, medium
-        ("512x512 Q90", 64 * 64, 0.7),    // 4096 blocks, dense
+        ("512x512 Q50", 64 * 64, 0.3),     // 4096 blocks, sparse
+        ("512x512 Q75", 64 * 64, 0.5),     // 4096 blocks, medium
+        ("512x512 Q90", 64 * 64, 0.7),     // 4096 blocks, dense
         ("2048x2048 Q75", 256 * 256, 0.5), // 65536 blocks
     ];
 
@@ -138,8 +138,10 @@ fn main() {
         }
 
         // Benchmark
-        let (std_time, std_bytes) = benchmark_standard_encoder(&blocks, &dc_table, &ac_table, iterations);
-        let (fast_time, fast_bytes) = benchmark_fast_encoder(&blocks, &dc_table, &ac_table, iterations);
+        let (std_time, std_bytes) =
+            benchmark_standard_encoder(&blocks, &dc_table, &ac_table, iterations);
+        let (fast_time, fast_bytes) =
+            benchmark_fast_encoder(&blocks, &dc_table, &ac_table, iterations);
 
         let speedup = std_time / fast_time;
 

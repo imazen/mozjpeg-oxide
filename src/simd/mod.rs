@@ -119,20 +119,27 @@ impl SimdOps {
         #[cfg(feature = "fast-yuv")]
         let color_fn: ColorConvertFn = convert_rgb_to_ycbcr_yuv;
 
-        #[cfg(all(not(feature = "fast-yuv"), target_arch = "x86_64", feature = "simd-intrinsics"))]
+        #[cfg(all(
+            not(feature = "fast-yuv"),
+            target_arch = "x86_64",
+            feature = "simd-intrinsics"
+        ))]
         let color_fn: ColorConvertFn = if is_x86_feature_detected!("avx2") {
             x86_64::avx2::convert_rgb_to_ycbcr
         } else {
             scalar::convert_rgb_to_ycbcr
         };
 
-        #[cfg(all(not(feature = "fast-yuv"), not(all(target_arch = "x86_64", feature = "simd-intrinsics"))))]
+        #[cfg(all(
+            not(feature = "fast-yuv"),
+            not(all(target_arch = "x86_64", feature = "simd-intrinsics"))
+        ))]
         let color_fn: ColorConvertFn = scalar::convert_rgb_to_ycbcr;
 
         // DCT: prefer intrinsics, then scalar with multiversion
         #[cfg(all(target_arch = "x86_64", feature = "simd-intrinsics"))]
         let dct_fn: ForwardDctFn = if is_x86_feature_detected!("avx2") {
-            x86_64::avx2::forward_dct_8x8
+            x86_64::avx2::forward_dct_8x8_i32_avx2_intrinsics
         } else {
             scalar::forward_dct_8x8
         };
@@ -162,7 +169,7 @@ impl SimdOps {
     pub fn avx2_intrinsics() -> Option<Self> {
         if is_x86_feature_detected!("avx2") {
             Some(Self {
-                forward_dct: x86_64::avx2::forward_dct_8x8,
+                forward_dct: x86_64::avx2::forward_dct_8x8_i32_avx2_intrinsics,
                 color_convert_rgb_to_ycbcr: x86_64::avx2::convert_rgb_to_ycbcr,
             })
         } else {

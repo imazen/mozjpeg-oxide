@@ -17,3 +17,6 @@ benchmark_results.csv
 Thumbs.db
 tests/benchmark_tracking/results/*.json
 perf.data*
+perf_*.data
+*.profile.json
+*_profile.json

@@ -1,0 +1,63 @@
+# Reproducible performance benchmark for mozjpeg-rs vs C mozjpeg
+#
+# Uses Criterion for statistically rigorous benchmarking.
+# Synthetic test images - no external downloads needed.
+#
+# Build:
+#   docker build -f benchmark/Dockerfile.perf -t mozjpeg-rs-perf .
+#
+# Run:
+#   docker run --rm mozjpeg-rs-perf
+#
+# Options:
+#   docker run --rm mozjpeg-rs-perf --bench rust_vs_c    # Just Rust vs C comparison
+#   docker run --rm mozjpeg-rs-perf --bench image_sizes  # Different image sizes
+#   docker run --rm mozjpeg-rs-perf -- --quick           # Faster, less precise
+#
+# REPRODUCIBILITY:
+# - Cargo.lock pins all Rust dependency versions
+# - mozjpeg-sys builds mozjpeg from vendored source (statically linked)
+# - Synthetic images generated from deterministic algorithm
+# - Criterion provides statistical analysis (CI, outlier detection)
+
+# Rust 1.89+ required by dependencies (wide, safe_arch)
+FROM rust:1.92-bookworm AS builder
+
+RUN apt-get update && apt-get install -y \
+    cmake \
+    nasm \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy dependency files first for layer caching
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+
+# Create dummy src/benches to build dependencies
+RUN mkdir src && echo "pub fn dummy() {}" > src/lib.rs && \
+    mkdir -p benches && echo "fn main() {}" > benches/encode.rs
+
+# Build dependencies only (cached layer)
+RUN cargo build --release --bench encode 2>/dev/null || true
+
+# Copy actual source
+COPY . .
+
+# Touch files to ensure rebuild
+RUN touch src/lib.rs benches/encode.rs
+
+# Build the benchmark
+RUN cargo build --release --bench encode
+
+LABEL org.opencontainers.image.title="mozjpeg-rs Performance Benchmark"
+LABEL org.opencontainers.image.description="Reproducible Criterion benchmark comparing mozjpeg-rs to C mozjpeg"
+LABEL org.opencontainers.image.source="https://github.com/imazen/mozjpeg-rs"
+
+# Run benchmarks directly (Criterion outputs to stdout)
+# All arguments are passed to Criterion after "--"
+# Usage: docker run --rm mozjpeg-rs-perf [-- criterion_args]
+# Example: docker run --rm mozjpeg-rs-perf -- rust_vs_c --quick
+ENTRYPOINT ["cargo", "bench", "--bench", "encode", "--"]
+CMD ["--color", "never"]
